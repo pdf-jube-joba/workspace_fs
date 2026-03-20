@@ -1,0 +1,229 @@
+:root {
+  color-scheme: light;
+  --bg: #efe8de;
+  --panel: rgba(255, 251, 245, 0.92);
+  --panel-strong: #fffdf8;
+  --border: #d2c5b3;
+  --text: #2f2418;
+  --muted: #74624f;
+  --accent: #8a3f10;
+  --shadow: 0 16px 40px rgba(70, 48, 24, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(160, 93, 46, 0.16), transparent 28%),
+    linear-gradient(180deg, #f7f1e7 0%, var(--bg) 100%);
+  color: var(--text);
+  font-family: "Iosevka Aile", "IBM Plex Sans JP", sans-serif;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 20px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.toolbar,
+.board-pane {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.toolbar {
+  padding: 14px 16px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.toolbar-sort {
+  display: grid;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.toolbar-sort-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toolbar-select {
+  appearance: none;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #fffaf2 0%, #f0e6d6 100%);
+  color: var(--text);
+  font: inherit;
+}
+
+.toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #fffaf2 0%, #f0e6d6 100%);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.toolbar-link:hover {
+  background: linear-gradient(180deg, #fff4df 0%, #e9dcc7 100%);
+}
+
+.toolbar-link[aria-disabled="true"] {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.toolbar-paths {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.toolbar-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toolbar-path {
+  font-family: "Iosevka", "IBM Plex Mono", monospace;
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.toolbar-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toolbar-status.is-error {
+  color: #9f2f2f;
+}
+
+.board-pane {
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 220px);
+  grid-auto-rows: 180px;
+  gap: 14px;
+  justify-content: start;
+}
+
+.card {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: 220px;
+  height: 180px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(245, 236, 223, 0.9) 100%);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: 0 10px 28px rgba(70, 48, 24, 0.08);
+  overflow: hidden;
+}
+
+.card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(138, 63, 16, 0.35);
+}
+
+.card-kind {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(138, 63, 16, 0.1);
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.card-peek {
+  margin: 0;
+  min-height: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.empty-state {
+  padding: 32px 18px;
+  color: var(--muted);
+}
+
+.scroll-sentinel {
+  height: 1px;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 12px;
+  }
+
+  .toolbar {
+    flex-direction: column;
+  }
+
+  .toolbar-sort {
+    width: 100%;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-auto-rows: 180px;
+  }
+
+  .card {
+    width: auto;
+  }
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Directory View</title>
+  <link rel="stylesheet" href="./directory_view.css">
+</head>
+<body>
+  <main class="app">
+    <section class="toolbar">
+      <div class="toolbar-actions">
+        <a id="home-link" class="toolbar-link" href="/">Home</a>
+        <a id="up-link" class="toolbar-link" href="/">Up</a>
+      </div>
+      <label class="toolbar-sort" for="sort-select">
+        <span class="toolbar-sort-label">Sort</span>
+        <select id="sort-select" class="toolbar-select">
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="abc">ABC</option>
+        </select>
+      </label>
+      <div class="toolbar-paths">
+        <div id="mode-label" class="toolbar-label">Directory</div>
+        <div id="path-text" class="toolbar-path"></div>
+        <div id="status-text" class="toolbar-status">Loading ...</div>
+      </div>
+    </section>
+
+    <section class="board-pane">
+      <div id="card-grid" class="card-grid"></div>
+      <div id="empty-state" class="empty-state" hidden>No displayable entries.</div>
+      <div id="scroll-sentinel" class="scroll-sentinel" aria-hidden="true"></div>
+    </section>
+  </main>
+
+  <script type="module" src="./directory_view.js"></script>
+</body>
+</html>

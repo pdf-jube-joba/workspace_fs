@@ -1,0 +1,19 @@
+name = "example"
+
+[[plugin]]
+name = "md-preview"
+runner = "command"
+command = ["node", "../md_preview/build.mjs", "--out-dir", "{OUTPUT_DIRECTORY}"]
+trigger = "manual"
+mount = "/md/"
+
+[plugin.md_preview]
+macros_path = "macros.txt"
+
+[[task]]
+name = "md"
+steps = ["md-preview"]
+
+[[policy]]
+path = "README.md"
+GET = true

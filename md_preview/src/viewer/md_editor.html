@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markdown Editor</title>
+  <link rel="stylesheet" href="./md_editor.css">
+  <link rel="stylesheet" href="./vendor/katex/katex.min.css">
+</head>
+<body>
+  <main class="app">
+    <section class="statusbar">
+      <div class="status-actions">
+        <button id="preview-button" class="status-action-button" type="button">Preview</button>
+      </div>
+      <div class="status-body">
+        <div id="status-text">Ready.</div>
+        <div class="status-note">Browser requests always use `user-identity: from_browser`.</div>
+      </div>
+    </section>
+
+    <section class="panes">
+      <section class="pane">
+        <h1>Preview</h1>
+        <div id="preview" class="surface"></div>
+      </section>
+      <section class="pane">
+        <h1>Editor</h1>
+        <textarea id="editor" class="surface editor" spellcheck="false"></textarea>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="./md_editor.js"></script>
+</body>
+</html>

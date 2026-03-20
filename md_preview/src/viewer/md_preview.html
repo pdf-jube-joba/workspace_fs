@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markdown Preview</title>
+  <link rel="stylesheet" href="./md_preview.css">
+  <link rel="stylesheet" href="./vendor/katex/katex.min.css">
+</head>
+<body>
+  <main class="app">
+    <button
+      id="sidebar-edge-toggle"
+      class="sidebar-edge-toggle"
+      type="button"
+      aria-controls="sidebar"
+      aria-expanded="false"
+      aria-label="Show navigation"
+    >
+      ▸
+    </button>
+
+    <div class="workspace">
+      <aside id="sidebar" class="sidebar-pane" aria-label="Navigation sidebar">
+        <div class="sidebar-header">
+          <h1>Navigation</h1>
+        </div>
+        <nav id="navigation" class="surface navigation"></nav>
+      </aside>
+
+      <button
+        id="sidebar-divider-toggle"
+        class="sidebar-divider-toggle"
+        type="button"
+        aria-controls="sidebar"
+        aria-expanded="true"
+        aria-label="Hide navigation"
+      >
+        ◂
+      </button>
+
+      <section class="content-pane">
+        <section class="statusbar">
+          <div class="status-actions">
+            <a id="edit-link" class="status-action-link" href="/">Edit</a>
+            <a id="home-link" class="status-action-link" href="/">Home</a>
+            <a id="up-link" class="status-action-link" href="/">Up</a>
+          </div>
+          <div class="status-body">
+            <div class="status-label">PATH</div>
+            <div id="path-text" class="status-path"></div>
+            <div id="status-text" class="status-text">Loading ...</div>
+          </div>
+        </section>
+
+        <section class="pane preview-pane">
+          <h1>Preview</h1>
+          <div id="preview" class="surface"></div>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="./md_preview.js"></script>
+</body>
+</html>
