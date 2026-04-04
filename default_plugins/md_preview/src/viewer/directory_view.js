@@ -1,4 +1,14 @@
-import {fetchTextFile, normalizePath, requestHeaders} from "./markdown_runtime.js";
+import {currentFileUrl, fetchTextFile, normalizePath, requestHeaders} from "./markdown_runtime.js";
+import {
+  applyTheme,
+  detectNavigationMode,
+  directoryViewHref,
+  fetchDirectoryEntries,
+  joinPath,
+  parentDirectoryPath,
+  previewHref,
+  setLinkState,
+} from "./viewer_common.js";
 
 const PAGE_SIZE = 24;
 const PREVIEW_LIMIT = 100;
@@ -17,6 +27,9 @@ const scrollSentinel = document.querySelector("#scroll-sentinel");
 const homeLink = document.querySelector("#home-link");
 const upLink = document.querySelector("#up-link");
 const sortSelect = document.querySelector("#sort-select");
+const newForm = document.querySelector("#new-form");
+const newNameInput = document.querySelector("#new-name");
+const newButton = document.querySelector("#new-button");
 
 let entries = [];
 let nextIndex = 0;
@@ -32,47 +45,6 @@ function currentParams() {
   return new URL(window.location.href).searchParams;
 }
 
-function splitPath(path) {
-  const normalized = normalizePath(path);
-  const trimmed = normalized.replace(/\/+$/, "");
-  if (!trimmed) {
-    return {
-      directory: "",
-      name: "",
-    };
-  }
-
-  const lastSlash = trimmed.lastIndexOf("/");
-  if (lastSlash === -1) {
-    return {
-      directory: "",
-      name: trimmed,
-    };
-  }
-
-  return {
-    directory: trimmed.slice(0, lastSlash),
-    name: trimmed.slice(lastSlash + 1),
-  };
-}
-
-function joinPath(directory, entry) {
-  const normalizedDirectory = normalizePath(directory).replace(/\/+$/, "");
-  const normalizedEntry = normalizePath(entry);
-  if (!normalizedDirectory) {
-    return normalizedEntry;
-  }
-  if (!normalizedEntry) {
-    return normalizedDirectory;
-  }
-  return `${normalizedDirectory}/${normalizedEntry}`;
-}
-
-function directoryUrl(directory) {
-  const normalizedDirectory = normalizePath(directory).replace(/\/+$/, "");
-  return normalizedDirectory ? `/${normalizedDirectory}/` : "/";
-}
-
 function currentSortFromLocation() {
   return currentParams().get("sort") || DEFAULT_SORT;
 }
@@ -81,20 +53,8 @@ function currentSortMode() {
   return sortSelect.value || DEFAULT_SORT;
 }
 
-function directoryViewHref({path = "", link = ""} = {}) {
-  const url = new URL("./directory_view.html", window.location.href);
-  if (path) {
-    url.searchParams.set("path", normalizePath(path));
-  }
-  if (link) {
-    url.searchParams.set("link", link);
-  }
-  url.searchParams.set("sort", currentSortMode());
-  return `${url.pathname}${url.search}`;
-}
-
 function markdownPreviewHref(path) {
-  return `./md_preview.html?path=${encodeURIComponent(normalizePath(path))}`;
+  return previewHref(path);
 }
 
 function infoPathUrl(path) {
@@ -102,23 +62,20 @@ function infoPathUrl(path) {
   return normalized ? `/.info/${normalized}` : "/.info";
 }
 
-function parentDirectoryPath(path) {
-  const normalized = normalizePath(path).replace(/\/+$/, "");
-  if (!normalized) {
-    return "";
-  }
-  const {directory} = splitPath(normalized);
-  return directory;
+function setCreateEnabled(enabled) {
+  newNameInput.disabled = !enabled;
+  newButton.disabled = !enabled;
 }
 
-function setLinkState(link, href) {
-  if (!href) {
-    link.removeAttribute("href");
-    link.setAttribute("aria-disabled", "true");
-    return;
+function setCurrentSortMode(value, {replaceHistory = true} = {}) {
+  const sort = SORT_VALUES.has(value) ? value : DEFAULT_SORT;
+  sortSelect.value = sort;
+  if (replaceHistory) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("sort", sort);
+    window.history.replaceState(window.history.state, "", url);
   }
-  link.href = href;
-  link.setAttribute("aria-disabled", "false");
+  return sort;
 }
 
 function fileExtension(path) {
@@ -137,32 +94,26 @@ function currentMode() {
   if (link) {
     return {kind: "link", value: link};
   }
-  const path = normalizePath(params.get("path") || "").replace(/\/+$/, "");
-  return {kind: "directory", value: path};
+  return {
+    kind: "directory",
+    value: normalizePath(params.get("path") || "").replace(/\/+$/, ""),
+  };
 }
 
-function setCurrentSortMode(value, {replaceHistory = true} = {}) {
-  const sort = SORT_VALUES.has(value) ? value : DEFAULT_SORT;
-  sortSelect.value = sort;
-  if (replaceHistory) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("sort", sort);
-    window.history.replaceState(window.history.state, "", url);
-  }
-  return sort;
-}
-
-async function fetchDirectoryEntries(directory) {
-  const response = await fetch(directoryUrl(directory), {
-    method: "GET",
-    headers: requestHeaders(),
+async function createEmptyMarkdownFile(path) {
+  const response = await fetch(currentFileUrl(path), {
+    method: "POST",
+    headers: {
+      ...requestHeaders(),
+      "Content-Type": "text/plain; charset=utf-8",
+    },
+    body: "",
   });
-  if (!response.ok) {
-    throw new Error(`GET failed: ${response.status} ${response.statusText}`);
-  }
 
-  const text = await response.text();
-  return text.split("\n").map(line => line.trim()).filter(Boolean);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`POST failed: ${response.status} ${detail || response.statusText}`);
+  }
 }
 
 async function fetchPathInfo(path) {
@@ -260,11 +211,21 @@ function sortEntries(items, sortMode) {
 
 async function buildDirectoryCard(entry) {
   const children = await fetchDirectoryEntries(entry.path);
+  let peek = children.join(" ").slice(0, PREVIEW_LIMIT);
+
+  if (children.includes("README.md")) {
+    try {
+      peek = cleanPeek(await fetchTextFile(joinPath(entry.path, "README.md")));
+    } catch {
+      // Keep listing preview when README.md cannot be read.
+    }
+  }
+
   return {
     kind: "directory",
     title: entry.title.replace(/\/$/, ""),
-    peek: children.join(" ").slice(0, PREVIEW_LIMIT),
-    href: directoryViewHref({path: entry.path}),
+    peek,
+    href: directoryViewHref({path: entry.path, sort: currentSortMode()}),
   };
 }
 
@@ -363,10 +324,9 @@ function observeInfiniteScroll() {
   observer?.disconnect();
   observer = new IntersectionObserver(intersections => {
     for (const entry of intersections) {
-      if (!entry.isIntersecting) {
-        continue;
+      if (entry.isIntersecting) {
+        void loadNextPage();
       }
-      void loadNextPage();
     }
   }, {
     root: boardPane,
@@ -389,6 +349,16 @@ async function rerenderCards() {
   await loadNextPage();
 }
 
+async function applyModeTheme(mode) {
+  if (mode.kind === "link") {
+    applyTheme({view: "directory", navigation: "navigation"});
+    return;
+  }
+
+  const navigation = await detectNavigationMode(mode.value).catch(() => "listing");
+  applyTheme({view: "directory", navigation});
+}
+
 async function loadView() {
   const mode = currentMode();
   cardGrid.innerHTML = "";
@@ -396,7 +366,9 @@ async function loadView() {
   entries = [];
   nextIndex = 0;
 
-  setLinkState(homeLink, directoryViewHref({path: ""}));
+  setLinkState(homeLink, directoryViewHref({sort: currentSortMode()}));
+  setCreateEnabled(mode.kind === "directory");
+  await applyModeTheme(mode);
 
   if (mode.kind === "link") {
     modeLabel.textContent = "Link";
@@ -407,7 +379,10 @@ async function loadView() {
   } else {
     modeLabel.textContent = "Directory";
     pathText.textContent = mode.value ? `/${mode.value}/` : "/";
-    setLinkState(upLink, mode.value ? directoryViewHref({path: parentDirectoryPath(mode.value)}) : "");
+    setLinkState(
+      upLink,
+      mode.value ? directoryViewHref({path: parentDirectoryPath(mode.value), sort: currentSortMode()}) : "",
+    );
     setStatus(`Loading ${mode.value ? `/${mode.value}/` : "/"} ...`);
     entries = await loadEntriesForDirectory(mode.value);
   }
@@ -423,11 +398,54 @@ async function loadView() {
   await loadNextPage();
 }
 
+async function handleCreateMarkdown(event) {
+  event.preventDefault();
+  const mode = currentMode();
+  if (mode.kind !== "directory") {
+    setStatus("New markdown is only available in directory mode.", true);
+    return;
+  }
+
+  const rawName = newNameInput.value.trim();
+  const normalizedName = normalizePath(rawName);
+  if (!normalizedName) {
+    setStatus("Enter a markdown filename.", true);
+    return;
+  }
+  if (normalizedName.includes("/")) {
+    setStatus("Filename must not include '/'.", true);
+    return;
+  }
+  if (!normalizedName.endsWith(".md")) {
+    setStatus("Filename must end with .md.", true);
+    return;
+  }
+
+  const path = joinPath(mode.value, normalizedName);
+  setCreateEnabled(false);
+  setStatus(`Creating ${path} ...`);
+  try {
+    await createEmptyMarkdownFile(path);
+    newNameInput.value = "";
+    await loadView();
+    setStatus(`Created ${path}.`);
+  } catch (error) {
+    setStatus(String(error), true);
+  } finally {
+    setCreateEnabled(currentMode().kind === "directory");
+  }
+}
+
 sortSelect.addEventListener("change", () => {
   setCurrentSortMode(sortSelect.value);
   void rerenderCards();
 });
 
+newForm.addEventListener("submit", event => {
+  void handleCreateMarkdown(event);
+});
+
+applyTheme({view: "directory", navigation: "listing"});
 setCurrentSortMode(currentSortFromLocation());
 void loadView().catch(error => {
   setStatus(String(error), true);

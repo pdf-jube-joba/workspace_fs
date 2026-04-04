@@ -8,11 +8,21 @@
 </head>
 <body>
   <main class="app">
-    <section class="toolbar">
-      <div class="toolbar-actions">
+    <section class="nav-panel">
+      <div class="nav-actions">
         <a id="home-link" class="toolbar-link" href="/">Home</a>
         <a id="up-link" class="toolbar-link" href="/">Up</a>
       </div>
+    </section>
+
+    <section class="toolbar">
+      <form id="new-form" class="toolbar-create">
+        <label class="toolbar-create-label" for="new-name">New Markdown</label>
+        <div class="toolbar-create-controls">
+          <input id="new-name" class="toolbar-input" type="text" placeholder="note.md" spellcheck="false">
+          <button id="new-button" class="toolbar-button" type="submit">New</button>
+        </div>
+      </form>
       <label class="toolbar-sort" for="sort-select">
         <span class="toolbar-sort-label">Sort</span>
         <select id="sort-select" class="toolbar-select">

@@ -1,4 +1,4 @@
-export function createRemarkRehypeOptions({basePath, katexMacros, renderKatexNode, renderMathError}) {
+export function createRemarkRehypeOptions({ basePath }) {
   return {
     allowDangerousHtml: true,
     handlers: {
@@ -10,24 +10,6 @@ export function createRemarkRehypeOptions({basePath, katexMacros, renderKatexNod
             className: ["md-definition-list"],
           },
           children: node.children.flatMap(item => definitionItemToHast(state, item)),
-        };
-      },
-      inlineMath(state, node) {
-        return {
-          type: "raw",
-          value: renderKatexNode(node, katexMacros, false),
-        };
-      },
-      displayMath(state, node) {
-        return {
-          type: "raw",
-          value: renderKatexNode(node, katexMacros, true),
-        };
-      },
-      mathError(state, node) {
-        return {
-          type: "raw",
-          value: renderMathError(node.value, node.message, false),
         };
       },
       alert(state, node) {
@@ -45,7 +27,7 @@ export function createRemarkRehypeOptions({basePath, katexMacros, renderKatexNod
               properties: {
                 className: ["md-alert-title"],
               },
-              children: [{type: "text", value: alertLabel(type)}],
+              children: [{ type: "text", value: alertLabel(type) }],
             },
             {
               type: "element",
@@ -63,7 +45,7 @@ export function createRemarkRehypeOptions({basePath, katexMacros, renderKatexNod
         return {
           type: "element",
           tagName: "a",
-          properties: {href},
+          properties: { href },
           children: state.all(node),
         };
       },
@@ -71,8 +53,8 @@ export function createRemarkRehypeOptions({basePath, katexMacros, renderKatexNod
         return {
           type: "element",
           tagName: "a",
-          properties: {href: wikiLinkHref(node.term)},
-          children: [{type: "text", value: node.term}],
+          properties: { href: wikiLinkHref(node.term) },
+          children: [{ type: "text", value: node.term }],
         };
       },
       image(state, node) {
@@ -101,13 +83,13 @@ function definitionItemToHast(state, item) {
       type: "element",
       tagName: "dt",
       properties: {},
-      children: state.all({type: "paragraph", children: item.termChildren}),
+      children: state.all({ type: "paragraph", children: item.termChildren }),
     },
     ...item.definitions.map(definition => ({
       type: "element",
       tagName: "dd",
       properties: {},
-      children: state.all({type: "root", children: [definition]}),
+      children: state.all({ type: "root", children: [definition] }),
     })),
   ];
 }
@@ -146,12 +128,13 @@ function resolveMarkdownHref(href, basePath) {
     return href;
   }
 
-  const resolvedPath = resolveRepositoryPath(href, basePath);
+  const { path, search, hash } = splitRelativeHref(href);
+  const resolvedPath = resolveRepositoryPath(path, basePath);
   if (resolvedPath.endsWith(".md")) {
-    return `./md_preview.html?path=${encodeURIComponent(resolvedPath)}`;
+    return `./md_preview.html?path=${encodeURIComponent(resolvedPath)}${hash}`;
   }
 
-  return `/${resolvedPath}`;
+  return `/${resolvedPath}${search}${hash}`;
 }
 
 function resolveAssetHref(href, basePath) {
@@ -159,7 +142,28 @@ function resolveAssetHref(href, basePath) {
     return href;
   }
 
-  return `/${resolveRepositoryPath(href, basePath)}`;
+  const { path, search, hash } = splitRelativeHref(href);
+  return `/${resolveRepositoryPath(path, basePath)}${search}${hash}`;
+}
+
+function splitRelativeHref(href) {
+  const hashIndex = href.indexOf("#");
+  const beforeHash = hashIndex === -1 ? href : href.slice(0, hashIndex);
+  const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
+  const searchIndex = beforeHash.indexOf("?");
+  if (searchIndex === -1) {
+    return {
+      path: beforeHash,
+      search: "",
+      hash,
+    };
+  }
+
+  return {
+    path: beforeHash.slice(0, searchIndex),
+    search: beforeHash.slice(searchIndex),
+    hash,
+  };
 }
 
 function resolveRepositoryPath(target, basePath) {

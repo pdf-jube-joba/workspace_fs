@@ -1,17 +1,24 @@
 import {renderMarkdownToElement} from "./markdown_viewer.js";
+import {fetchTextFile, loadMacros, normalizePath} from "./markdown_runtime.js";
 import {
-  currentFileUrl,
-  fetchTextFile,
-  loadMacros,
-  normalizePath,
-  requestHeaders,
-} from "./markdown_runtime.js";
+  applyTheme,
+  detectNavigationMode,
+  directoryUrl,
+  directoryViewHref,
+  editorHref,
+  fetchDirectoryEntries,
+  fetchOptionalText,
+  isNotFoundLike,
+  joinPath,
+  parentDirectoryPath,
+  previewHref,
+  setLinkState,
+} from "./viewer_common.js";
 
 const pathText = document.querySelector("#path-text");
 const preview = document.querySelector("#preview");
 const navigation = document.querySelector("#navigation");
-const sidebarEdgeToggle = document.querySelector("#sidebar-edge-toggle");
-const sidebarDividerToggle = document.querySelector("#sidebar-divider-toggle");
+const sidebarToggle = document.querySelector("#sidebar-toggle");
 const editLink = document.querySelector("#edit-link");
 const homeLink = document.querySelector("#home-link");
 const upLink = document.querySelector("#up-link");
@@ -27,59 +34,14 @@ function setStatus(message, isError = false) {
 
 function setSidebarCollapsed(collapsed) {
   app.classList.toggle("sidebar-collapsed", collapsed);
-  sidebarEdgeToggle.setAttribute("aria-expanded", String(!collapsed));
-  sidebarDividerToggle.setAttribute("aria-expanded", String(!collapsed));
+  sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  sidebarToggle.setAttribute("aria-label", collapsed ? "Show navigation" : "Hide navigation");
+  sidebarToggle.textContent = collapsed ? "▸" : "◂";
   window.localStorage.setItem(sidebarStateKey, collapsed ? "1" : "0");
 }
 
 function initializeSidebarState() {
-  const collapsed = window.localStorage.getItem(sidebarStateKey) === "1";
-  setSidebarCollapsed(collapsed);
-}
-
-function splitPath(path) {
-  const normalized = normalizePath(path);
-  const lastSlash = normalized.lastIndexOf("/");
-  if (lastSlash === -1) {
-    return {
-      directory: "",
-      name: normalized,
-    };
-  }
-
-  return {
-    directory: normalized.slice(0, lastSlash),
-    name: normalized.slice(lastSlash + 1),
-  };
-}
-
-function joinPath(directory, entry) {
-  const normalizedDirectory = normalizePath(directory);
-  const normalizedEntry = normalizePath(entry);
-  if (!normalizedDirectory) {
-    return normalizedEntry;
-  }
-  if (!normalizedEntry) {
-    return normalizedDirectory;
-  }
-  return `${normalizedDirectory}/${normalizedEntry}`;
-}
-
-function directoryUrl(directory) {
-  const normalizedDirectory = normalizePath(directory);
-  return normalizedDirectory ? `/${normalizedDirectory}/` : "/";
-}
-
-function previewHref(path) {
-  return `./md_preview.html?path=${encodeURIComponent(path)}`;
-}
-
-function editorHref(path) {
-  return `./md_editor.html?path=${encodeURIComponent(path)}`;
-}
-
-function directoryViewHref(path) {
-  return `./directory_view.html?path=${encodeURIComponent(normalizePath(path))}`;
+  setSidebarCollapsed(window.localStorage.getItem(sidebarStateKey) === "1");
 }
 
 function isExternalLink(path) {
@@ -97,61 +59,11 @@ function toDisplayPath(path) {
   return normalizePath(path) || "/";
 }
 
-function setActionLinkState(link, href) {
-  if (!href) {
-    link.removeAttribute("href");
-    link.setAttribute("aria-disabled", "true");
-    return;
-  }
-
-  link.href = href;
-  link.setAttribute("aria-disabled", "false");
-}
-
-async function updateHeaderLinks(path) {
+function updateHeaderLinks(path) {
   editLink.href = editorHref(path);
   editLink.setAttribute("aria-disabled", path ? "false" : "true");
-  const {directory} = splitPath(path);
-  setActionLinkState(homeLink, directoryViewHref(""));
-  setActionLinkState(upLink, directoryViewHref(directory));
-}
-
-async function fetchOptionalText(path) {
-  const response = await fetch(currentFileUrl(normalizePath(path)), {
-    method: "GET",
-    headers: requestHeaders(),
-  });
-  if (response.status === 404) {
-    return null;
-  }
-  if (!response.ok) {
-    const error = new Error(`GET failed: ${response.status} ${response.statusText}`);
-    error.status = response.status;
-    throw error;
-  }
-  return response.text();
-}
-
-async function fetchDirectoryEntries(directory) {
-  const response = await fetch(directoryUrl(directory), {
-    method: "GET",
-    headers: requestHeaders(),
-  });
-  if (!response.ok) {
-    const error = new Error(`GET failed: ${response.status} ${response.statusText}`);
-    error.status = response.status;
-    throw error;
-  }
-
-  const text = await response.text();
-  if (!text.trim()) {
-    return [];
-  }
-  return text.split("\n").map(entry => entry.trim()).filter(Boolean);
-}
-
-function isNotFoundLike(error) {
-  return error?.status === 403 || error?.status === 404;
+  setLinkState(homeLink, directoryViewHref());
+  setLinkState(upLink, directoryViewHref({path: parentDirectoryPath(path)}));
 }
 
 function parseNavigationEntries(json, directory) {
@@ -192,17 +104,17 @@ function parseNavigationEntries(json, directory) {
 }
 
 async function loadNavigation(currentPath) {
-  const {directory} = splitPath(currentPath);
+  const directory = parentDirectoryPath(currentPath);
   const navigationPath = joinPath(directory, "navigation.json");
   let navigationUnavailable = false;
+
   try {
     const navigationText = await fetchOptionalText(navigationPath);
     if (navigationText !== null) {
-      const parsed = JSON.parse(navigationText);
       return {
         mode: "items",
         source: "navigation_json",
-        items: parseNavigationEntries(parsed, directory),
+        items: parseNavigationEntries(JSON.parse(navigationText), directory),
       };
     }
     navigationUnavailable = true;
@@ -235,14 +147,6 @@ async function loadNavigation(currentPath) {
   }
 }
 
-function isTextareaFocused() {
-  return document.activeElement?.tagName === "TEXTAREA";
-}
-
-function isPreviewableNavigationTarget(path) {
-  return canonicalPreviewPath(path).endsWith(".md");
-}
-
 function updateNavigationKeyboardTargets(result, currentPath) {
   if (result.mode !== "items" || result.source !== "navigation_json") {
     navigationKeyboardTargets = [];
@@ -251,7 +155,7 @@ function updateNavigationKeyboardTargets(result, currentPath) {
 
   const current = canonicalPreviewPath(currentPath);
   navigationKeyboardTargets = result.items
-    .filter(item => isPreviewableNavigationTarget(item.path))
+    .filter(item => canonicalPreviewPath(item.path).endsWith(".md"))
     .map(item => canonicalPreviewPath(item.path));
 
   if (!navigationKeyboardTargets.includes(current)) {
@@ -266,10 +170,9 @@ function navigateRelativeFromKeyboard(offset) {
     return;
   }
   const target = navigationKeyboardTargets[index + offset];
-  if (!target) {
-    return;
+  if (target) {
+    void navigateTo(target);
   }
-  void navigateTo(target);
 }
 
 function createNavigationLink(item, currentPath) {
@@ -282,13 +185,12 @@ function createNavigationLink(item, currentPath) {
 
   const normalizedCurrent = canonicalPreviewPath(currentPath);
   const normalizedItemPath = canonicalPreviewPath(item.path);
-  const isCurrent = normalizedItemPath === normalizedCurrent;
 
   const meta = document.createElement("span");
   meta.className = "navigation-meta";
   meta.textContent = toDisplayPath(item.path);
 
-  if (isCurrent) {
+  if (normalizedItemPath === normalizedCurrent) {
     const current = document.createElement("span");
     current.className = "navigation-current";
     current.append(label, meta);
@@ -298,7 +200,6 @@ function createNavigationLink(item, currentPath) {
 
   const link = document.createElement("a");
   link.className = "navigation-link";
-
   if (isExternalLink(item.path)) {
     link.href = item.path;
     link.target = "_blank";
@@ -322,6 +223,10 @@ function createNavigationLink(item, currentPath) {
 
 function renderNavigation(result, currentPath) {
   navigation.innerHTML = "";
+  applyTheme({
+    view: "md",
+    navigation: result.source === "navigation_json" ? "navigation" : "listing",
+  });
   updateNavigationKeyboardTargets(result, currentPath);
 
   if (result.mode === "not_permitted") {
@@ -332,9 +237,7 @@ function renderNavigation(result, currentPath) {
     return;
   }
 
-  const {items} = result;
-
-  if (!items.length) {
+  if (!result.items.length) {
     const empty = document.createElement("div");
     empty.className = "navigation-empty";
     empty.textContent = "No entries found.";
@@ -344,7 +247,7 @@ function renderNavigation(result, currentPath) {
 
   const list = document.createElement("ul");
   list.className = "navigation-list";
-  for (const item of items) {
+  for (const item of result.items) {
     list.append(createNavigationLink(item, currentPath));
   }
   navigation.append(list);
@@ -352,26 +255,22 @@ function renderNavigation(result, currentPath) {
 
 async function loadFile(path) {
   if (!path) {
+    applyTheme({view: "md", navigation: "listing"});
     setStatus("Query parameter `path` is required.", true);
     return;
   }
 
   const normalizedPath = normalizePath(path);
   pathText.textContent = normalizedPath;
-  void updateHeaderLinks(normalizedPath);
+  updateHeaderLinks(normalizedPath);
   setStatus(`Loading ${normalizedPath} ...`);
   preview.innerHTML = "";
   navigation.innerHTML = "";
 
-  const navigationPromise = loadNavigation(normalizedPath)
-    .then(result => {
-      renderNavigation(result, normalizedPath);
-      return result;
-    })
-    .catch(error => {
-      navigation.innerHTML = "";
-      throw error;
-    });
+  const navigationPromise = loadNavigation(normalizedPath).then(result => {
+    renderNavigation(result, normalizedPath);
+    return result;
+  });
 
   try {
     const [text, macros] = await Promise.all([
@@ -388,11 +287,11 @@ async function loadFile(path) {
     setStatus(`Loaded ${normalizedPath}.`);
   } catch (error) {
     preview.innerHTML = "";
-    try {
-      await navigationPromise;
-    } catch {
-      navigation.innerHTML = "";
-    }
+    navigation.innerHTML = "";
+    applyTheme({
+      view: "md",
+      navigation: await detectNavigationMode(parentDirectoryPath(normalizedPath)).catch(() => "listing"),
+    });
     setStatus(String(error), true);
   }
 }
@@ -405,9 +304,10 @@ async function navigateTo(path, {pushHistory = true} = {}) {
   const normalizedPath = normalizePath(path);
   if (!normalizedPath) {
     pathText.textContent = "(missing)";
-    void updateHeaderLinks("");
+    updateHeaderLinks("");
     preview.innerHTML = "";
     navigation.innerHTML = "";
+    applyTheme({view: "md", navigation: "listing"});
     setStatus("Query parameter `path` is required.", true);
     return;
   }
@@ -431,12 +331,8 @@ navigation.addEventListener("click", event => {
   void navigateTo(link.dataset.previewPath);
 });
 
-sidebarEdgeToggle.addEventListener("click", () => {
-  setSidebarCollapsed(false);
-});
-
-sidebarDividerToggle.addEventListener("click", () => {
-  setSidebarCollapsed(true);
+sidebarToggle.addEventListener("click", () => {
+  setSidebarCollapsed(!app.classList.contains("sidebar-collapsed"));
 });
 
 window.addEventListener("popstate", () => {
@@ -447,7 +343,7 @@ window.addEventListener("keydown", event => {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
     return;
   }
-  if (isTextareaFocused()) {
+  if (document.activeElement?.tagName === "TEXTAREA") {
     return;
   }
   if (event.key === "ArrowLeft") {
@@ -461,4 +357,5 @@ window.addEventListener("keydown", event => {
 });
 
 initializeSidebarState();
+applyTheme({view: "md", navigation: "listing"});
 void navigateTo(currentPathFromLocation(), {pushHistory: false});

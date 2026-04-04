@@ -70,8 +70,7 @@ pub fn inspect_policy_rules(rules: &[Policy], path: &WorkspacePath) -> Result<Po
         match selected {
             Some((ref best, _))
                 if best.depth > candidate.depth
-                    || (best.depth == candidate.depth
-                        && best.index > candidate.index) => {}
+                    || (best.depth == candidate.depth && best.index > candidate.index) => {}
             Some((ref best, _)) if best.depth == candidate.depth => {
                 selected = Some((candidate.clone(), "later_rule".to_owned()));
             }
@@ -141,7 +140,12 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_policy(MethodKind::Get, &rules, &workspace_path("/docs/public/index.md")).unwrap(),
+            resolve_policy(
+                MethodKind::Get,
+                &rules,
+                &workspace_path("/docs/public/index.md")
+            )
+            .unwrap(),
             Some(true)
         );
     }
@@ -206,7 +210,8 @@ mod tests {
             },
         ];
 
-        let inspection = inspect_policy_rules(&rules, &workspace_path("/docs/private/a.md")).unwrap();
+        let inspection =
+            inspect_policy_rules(&rules, &workspace_path("/docs/private/a.md")).unwrap();
 
         assert_eq!(inspection.matches.len(), 2);
         let selected = inspection.selected.unwrap();

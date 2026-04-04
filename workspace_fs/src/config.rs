@@ -166,8 +166,14 @@ impl RepositoryConfig {
         validate_url_prefix("serve.info_url_prefix", &self.serve.info_url_prefix)?;
 
         let prefixes = [
-            ("serve.plugin_url_prefix", self.serve.plugin_url_prefix.as_str()),
-            ("serve.policy_url_prefix", self.serve.policy_url_prefix.as_str()),
+            (
+                "serve.plugin_url_prefix",
+                self.serve.plugin_url_prefix.as_str(),
+            ),
+            (
+                "serve.policy_url_prefix",
+                self.serve.policy_url_prefix.as_str(),
+            ),
             ("serve.info_url_prefix", self.serve.info_url_prefix.as_str()),
         ];
         let reserved_url_prefix_paths = reserved_url_prefix_paths(&self.serve)?;
@@ -289,7 +295,9 @@ impl RepositoryConfig {
     }
 }
 
-fn deserialize_workspace_path<'de, D>(deserializer: D) -> std::result::Result<WorkspacePath, D::Error>
+fn deserialize_workspace_path<'de, D>(
+    deserializer: D,
+) -> std::result::Result<WorkspacePath, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -331,7 +339,10 @@ fn reserved_url_prefix_paths(settings: &ServeSettings) -> Result<Vec<WorkspacePa
     .collect()
 }
 
-fn path_uses_reserved_url_prefix(path: &WorkspacePath, reserved_prefixes: &[WorkspacePath]) -> bool {
+fn path_uses_reserved_url_prefix(
+    path: &WorkspacePath,
+    reserved_prefixes: &[WorkspacePath],
+) -> bool {
     reserved_prefixes
         .iter()
         .any(|reserved_prefix| path.starts_with(reserved_prefix))
@@ -434,11 +445,9 @@ GET = true
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("serve.plugin_url_prefix must start with /, must not be empty, and must not end with /")
-        );
+        assert!(error.to_string().contains(
+            "serve.plugin_url_prefix must start with /, must not be empty, and must not end with /"
+        ));
     }
 
     #[test]
@@ -475,7 +484,11 @@ port = 3000
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("failed to parse .repo/config.toml"));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to parse .repo/config.toml")
+        );
     }
 
     #[test]
@@ -511,7 +524,11 @@ GET = true
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
 
-        assert!(error.to_string().contains("policy path must not use glob syntax"));
+        assert!(
+            error
+                .to_string()
+                .contains("policy path must not use glob syntax")
+        );
     }
 
     #[test]
@@ -681,7 +698,11 @@ entrypoint = "default"
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
 
-        assert!(error.to_string().contains("non-manual plugin must set path"));
+        assert!(
+            error
+                .to_string()
+                .contains("non-manual plugin must set path")
+        );
     }
 
     #[test]
@@ -705,6 +726,10 @@ entrypoint = "default"
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
 
-        assert!(error.to_string().contains("manual plugin must not set path"));
+        assert!(
+            error
+                .to_string()
+                .contains("manual plugin must not set path")
+        );
     }
 }

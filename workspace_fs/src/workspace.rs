@@ -94,8 +94,8 @@ impl WorkspaceService {
         self.repository.repository_root()
     }
 
-    pub async fn run_task(&self, task_name: &str) -> Result<()> {
-        self.plugin_runner().run_task(task_name).await
+    pub async fn run_task(&self, task_name: &str, skip_deps: bool) -> Result<()> {
+        self.plugin_runner().run_task(task_name, skip_deps).await
     }
 
     pub async fn run_manual_plugin(
@@ -280,9 +280,7 @@ impl WorkspaceService {
         })?;
 
         if path.is_directory() && info.kind != crate::info::PathInfoKind::Directory {
-            return Err(WorkspaceError::bad_request(
-                "file path must not end with /",
-            ));
+            return Err(WorkspaceError::bad_request("file path must not end with /"));
         }
         if !path.is_directory() && info.kind == crate::info::PathInfoKind::Directory {
             return Err(WorkspaceError::bad_request(
@@ -345,10 +343,15 @@ impl WorkspaceService {
     }
 
     fn normalize_request_path(&self, path: &str) -> Result<WorkspacePath, WorkspaceError> {
-        WorkspacePath::from_url(path).map_err(|error| WorkspaceError::bad_request(error.to_string()))
+        WorkspacePath::from_url(path)
+            .map_err(|error| WorkspaceError::bad_request(error.to_string()))
     }
 
-    fn enforce_policy(&self, method: MethodKind, path: &WorkspacePath) -> Result<(), WorkspaceError> {
+    fn enforce_policy(
+        &self,
+        method: MethodKind,
+        path: &WorkspacePath,
+    ) -> Result<(), WorkspaceError> {
         let allowed = self
             .resolve_policy(method, path)
             .map_err(WorkspaceError::internal)?
@@ -409,11 +412,14 @@ impl WorkspaceService {
     }
 
     fn map_read_error(&self, error: anyhow::Error) -> WorkspaceError {
-        let message = error.to_string();
-        if message.contains("No such file") || message.contains("os error 2") {
+        if error_chain_contains(&error, "No such file")
+            || error_chain_contains(&error, "os error 2")
+        {
             return WorkspaceError::not_found("path not found");
         }
-        if message.contains("Is a directory") || message.contains("os error 21") {
+        if error_chain_contains(&error, "Is a directory")
+            || error_chain_contains(&error, "os error 21")
+        {
             return WorkspaceError::bad_request("path is a directory");
         }
         map_path_error(error)
@@ -498,6 +504,12 @@ fn content_type_for_path(path: &WorkspacePath) -> String {
     mime.to_string()
 }
 
+fn error_chain_contains(error: &anyhow::Error, needle: &str) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{body::to_bytes, http::header::CONTENT_TYPE};
@@ -509,12 +521,17 @@ mod tests {
     async fn file_response_uses_html_mime_and_binary_body() {
         let response = file_response(
             StatusCode::OK,
-            &content_type_for_path(&WorkspacePath::from_path_str("assets/md_preview.html").unwrap()),
+            &content_type_for_path(
+                &WorkspacePath::from_path_str("assets/md_preview.html").unwrap(),
+            ),
             b"<h1>x</h1>".to_vec(),
         );
         let headers = response.headers();
 
-        assert_eq!(headers.get(CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+        assert_eq!(
+            headers.get(CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..], b"<h1>x</h1>");
     }
@@ -529,13 +546,7 @@ mod tests {
 
     #[test]
     fn path_info_requires_directory_suffix_for_directories() {
-        let info = PathInfo::new(
-            "docs",
-            PathInfoKind::Directory,
-            None,
-            None,
-            false,
-        );
+        let info = PathInfo::new("docs", PathInfoKind::Directory, None, None, false);
 
         assert_eq!(info.kind, PathInfoKind::Directory);
     }

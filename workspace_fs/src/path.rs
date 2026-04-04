@@ -97,7 +97,10 @@ impl WorkspacePath {
     }
 
     pub(crate) fn strip_prefix<'a>(&'a self, other: &WorkspacePath) -> Option<&'a str> {
-        self.path.strip_prefix(&other.path).ok().map(Utf8Path::as_str)
+        self.path
+            .strip_prefix(&other.path)
+            .ok()
+            .map(Utf8Path::as_str)
     }
 
     pub(crate) fn depth(&self) -> usize {

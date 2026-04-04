@@ -168,11 +168,24 @@ async function loadEnhancer(spec) {
   if (typeof createEnhancer !== "function") {
     throw new Error(\`enhancer \${spec.name} does not export \${spec.entrypoint}\`);
   }
-  const enhance = createEnhancer(spec.options || {});
+  const enhance = createEnhancer({
+    ...(spec.options || {}),
+    bundleBaseUrl: baseUrlFromModuleUrl(spec.url),
+  });
   if (typeof enhance !== "function") {
     throw new Error(\`enhancer \${spec.name} did not return a function\`);
   }
   return enhance;
+}
+
+function baseUrlFromModuleUrl(value) {
+  const url = new URL(value, window.location.href);
+  const pathname = url.pathname;
+  const slash = pathname.lastIndexOf("/");
+  url.pathname = slash === -1 ? "/" : pathname.slice(0, slash + 1);
+  url.search = "";
+  url.hash = "";
+  return url.href;
 }
 `;
   await writeFile(outputPath, source);

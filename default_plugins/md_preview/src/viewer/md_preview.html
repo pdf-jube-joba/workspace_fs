@@ -5,20 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Markdown Preview</title>
   <link rel="stylesheet" href="./md_preview.css">
+  <link rel="stylesheet" href="./markdown_content.css">
   <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 </head>
 <body>
   <main class="app">
-    <button
-      id="sidebar-edge-toggle"
-      class="sidebar-edge-toggle"
-      type="button"
-      aria-controls="sidebar"
-      aria-expanded="false"
-      aria-label="Show navigation"
-    >
-      ▸
-    </button>
+    <section class="topbar">
+      <section class="nav-panel">
+        <div class="nav-actions">
+          <a id="home-link" class="status-action-link" href="/">Home</a>
+          <a id="up-link" class="status-action-link" href="/">Up</a>
+        </div>
+      </section>
+    </section>
 
     <div class="workspace">
       <aside id="sidebar" class="sidebar-pane" aria-label="Navigation sidebar">
@@ -29,11 +28,11 @@
       </aside>
 
       <button
-        id="sidebar-divider-toggle"
-        class="sidebar-divider-toggle"
+        id="sidebar-toggle"
+        class="sidebar-toggle"
         type="button"
         aria-controls="sidebar"
-        aria-expanded="true"
+        aria-expanded="false"
         aria-label="Hide navigation"
       >
         ◂
@@ -43,8 +42,6 @@
         <section class="statusbar">
           <div class="status-actions">
             <a id="edit-link" class="status-action-link" href="/">Edit</a>
-            <a id="home-link" class="status-action-link" href="/">Home</a>
-            <a id="up-link" class="status-action-link" href="/">Up</a>
           </div>
           <div class="status-body">
             <div class="status-label">PATH</div>

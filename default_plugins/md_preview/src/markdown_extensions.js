@@ -2,10 +2,6 @@ import {unified} from "unified";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 
-const INLINE_OPEN = "\\(";
-const INLINE_CLOSE = "\\)";
-const DISPLAY_OPEN = "\\[";
-const DISPLAY_CLOSE = "\\]";
 const WIKI_LINK_PATTERN = /\[\[([^[\]\n]+)\]\]/g;
 
 export function createMarkdownParser() {
@@ -48,7 +44,7 @@ export function remarkComputationExtensions() {
 }
 
 export function prepareMarkdownSource(text) {
-  return escapeMathDelimiters(String(text || ""));
+  return String(text || "");
 }
 
 function transformNode(node) {
@@ -162,7 +158,7 @@ function splitSpecialTextNode(node) {
       continue;
     }
 
-    pieces.push(...splitMathTextValue(piece.value));
+    pieces.push(makeTextNode(piece.value));
   }
 
   return pieces.filter(isNonEmptyNode);
@@ -200,40 +196,6 @@ function splitWikiLinkText(text) {
 
 function normalizeWikiLinkTerm(value) {
   return String(value || "").trim();
-}
-
-function splitMathTextValue(text) {
-  const pieces = [];
-  let index = 0;
-
-  while (index < text.length) {
-    const match = findNextMath(text, index);
-    if (!match) {
-      pieces.push(makeTextNode(text.slice(index)));
-      break;
-    }
-
-    if (match.start > index) {
-      pieces.push(makeTextNode(text.slice(index, match.start)));
-    }
-
-    if (match.error) {
-      pieces.push({
-        type: "mathError",
-        value: text.slice(match.start),
-        message: match.error,
-      });
-      return pieces.filter(isNonEmptyNode);
-    }
-
-    pieces.push({
-      type: match.display ? "displayMath" : "inlineMath",
-      value: match.content,
-    });
-    index = match.end;
-  }
-
-  return pieces.filter(isNonEmptyNode);
 }
 
 function transformDefinitionListParagraph(node) {
@@ -337,57 +299,6 @@ function extractDefinitionLine(children) {
   return {
     children: nextChildren,
   };
-}
-
-function findNextMath(text, fromIndex) {
-  const inlineStart = text.indexOf(INLINE_OPEN, fromIndex);
-  const displayStart = text.indexOf(DISPLAY_OPEN, fromIndex);
-
-  let start = -1;
-  let open = "";
-  let close = "";
-  let display = false;
-
-  if (inlineStart !== -1 && (displayStart === -1 || inlineStart < displayStart)) {
-    start = inlineStart;
-    open = INLINE_OPEN;
-    close = INLINE_CLOSE;
-    display = false;
-  } else if (displayStart !== -1) {
-    start = displayStart;
-    open = DISPLAY_OPEN;
-    close = DISPLAY_CLOSE;
-    display = true;
-  }
-
-  if (start === -1) {
-    return null;
-  }
-
-  const contentStart = start + open.length;
-  const closeIndex = text.indexOf(close, contentStart);
-  if (closeIndex === -1) {
-    return {
-      start,
-      error: `missing closing delimiter for ${open}`,
-    };
-  }
-
-  return {
-    start,
-    end: closeIndex + close.length,
-    display,
-    content: text.slice(contentStart, closeIndex),
-  };
-}
-
-function escapeMathDelimiters(text) {
-  return text
-    .replaceAll("\\\\", "\\\\\\\\")
-    .replaceAll(INLINE_OPEN, "\\\\(")
-    .replaceAll(INLINE_CLOSE, "\\\\)")
-    .replaceAll(DISPLAY_OPEN, "\\\\[")
-    .replaceAll(DISPLAY_CLOSE, "\\\\]");
 }
 
 function trimLeadingWhitespace(children) {

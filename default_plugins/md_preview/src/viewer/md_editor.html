@@ -5,10 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Markdown Editor</title>
   <link rel="stylesheet" href="./md_editor.css">
+  <link rel="stylesheet" href="./markdown_content.css">
   <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 </head>
 <body>
   <main class="app">
+    <section class="nav-panel">
+      <div class="nav-actions">
+        <button id="home-button" class="status-action-button" type="button">Home</button>
+        <button id="up-button" class="status-action-button" type="button">Up</button>
+      </div>
+    </section>
+
     <section class="statusbar">
       <div class="status-actions">
         <button id="preview-button" class="status-action-button" type="button">Preview</button>
