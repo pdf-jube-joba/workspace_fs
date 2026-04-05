@@ -17,8 +17,6 @@
   --md-alert-caution-bg: rgba(220, 38, 38, 0.08);
   --md-alert-default-border: #6b7280;
   --md-alert-default-bg: rgba(107, 114, 128, 0.08);
-  --md-math-error-border: rgba(159, 47, 47, 0.35);
-  --md-math-error-bg: rgba(159, 47, 47, 0.08);
 }
 
 .md-view p,
@@ -133,24 +131,4 @@
 
 .md-alert-body > :last-child {
   margin-bottom: 0;
-}
-
-.md-math-error {
-  display: block;
-  padding: 10px 12px;
-  border: 1px solid var(--md-math-error-border);
-  border-radius: 10px;
-  background: var(--md-math-error-bg);
-  color: var(--danger, #9f2f2f);
-}
-
-.md-math-error-label {
-  display: inline-block;
-  margin-right: 0.75rem;
-  font-weight: 700;
-}
-
-.md-math-error-message {
-  display: block;
-  margin-top: 0.5rem;
 }

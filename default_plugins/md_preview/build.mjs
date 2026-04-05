@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 const srcDir = path.join(__dirname, "src");
 const viewerSrcDir = path.join(srcDir, "viewer");
+const katexPreSrcDir = path.join(__dirname, "..", "katex_pre", "src");
 const args = parseArgs(process.argv.slice(2));
 const outDir = args.outDir;
 const repositoryRoot = args.repositoryRoot;
@@ -30,6 +31,7 @@ await copyMacrosFile(macrosSource, macrosOutPath);
 await cp(path.join(katexDistDir, "katex.min.css"), path.join(katexOutDir, "katex.min.css"));
 await cp(path.join(katexDistDir, "fonts"), path.join(katexOutDir, "fonts"), {recursive: true});
 await cp(viewerSrcDir, outDir, {recursive: true});
+await cp(path.join(katexPreSrcDir, "katex_pre.css"), path.join(outDir, "katex_pre.css"));
 await writeEnhanceRunner(path.join(outDir, "enhance_runner.js"), enhancers);
 await generateLinkIndex({outDir, repositoryRoot});
 

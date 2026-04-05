@@ -1,8 +1,5 @@
 # ほしい機能
-- static file としてのビルドは可能か？
-  現状だと、 policy で GET が許されているファイルを全部と、 plugin 以下の mount をそのファイル名に直せば、
-  static file にしてまとめることができるように思える。
-  API 経由で plugin の起動ができない点にだけ注意。
+- [] `GET` 時に ID を要求するものとしないものの設定が欲しい
 
 # internal な todo
 - `workspace.rs` が大きすぎるので分ける: fileservice/policyservice/infoservice/pluginservice/

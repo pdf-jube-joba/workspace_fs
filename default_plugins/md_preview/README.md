@@ -5,11 +5,12 @@ Source code lives in `src/`, and `build.mjs` bundles it into an explicitly speci
 The build script requires `--out-dir <path>` and writes all generated files under that directory.
 It generates `link_index.json` alongside the browser assets by scanning all repository markdown files.
 The built output includes the viewer HTML/CSS/JS from `src/viewer/`.
+It also copies the shared KaTeX stylesheet wrapper from `../katex_pre/src/katex_pre.css`.
 When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[plugin.md_preview]`, `build.mjs` also generates `enhance_runner.js` from `[[plugin.md_preview.enhance]]`.
 Set `[plugin.md_preview].macro_path` to copy a repository-local macros file into the built output as `macros.txt`. If it is omitted, no `macros.txt` is generated.
 When used through `workspace_fs`, mount the plugin output at any prefix and open the generated viewer files from that mount.
 It renders markdown to HTML in the browser with `remark` / `rehype`.
-It also adds local extensions for KaTeX-style math written as `\(...\)` / `\[...\]`.
+It uses shared helpers from `../katex_pre/` for KaTeX-style math written as `\(...\)` / `\[...\]`.
 GitHub-style alerts such as `> [!NOTE]` and `> [!TIP]` are converted to custom HTML blocks.
 KaTeX macros are not loaded implicitly by the viewer.
 Callers are expected to load `macros.txt`, convert it with `from_text(text)`, and pass the result as `macros`.
