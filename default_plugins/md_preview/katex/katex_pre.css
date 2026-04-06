@@ -1,0 +1,29 @@
+@import "./vendor/katex/katex.min.css";
+
+.md-math-error {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin: 0.15rem 0;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba(190, 55, 55, 0.25);
+  border-radius: 0.45rem;
+  background: rgba(190, 55, 55, 0.08);
+  color: #8d1f1f;
+}
+
+.md-math-error-label {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.md-math-error-message {
+  opacity: 0.85;
+}
+
+.md-math-error code {
+  padding: 0.08rem 0.28rem;
+  border-radius: 0.3rem;
+  background: rgba(0, 0, 0, 0.06);
+}

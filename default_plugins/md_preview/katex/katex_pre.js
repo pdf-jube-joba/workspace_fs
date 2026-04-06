@@ -40,6 +40,11 @@ export function renderMathMarkdown(text, {macros = {}, renderToString}) {
   });
 }
 
+export function transformMathMarkdown(text, {macros = {}, renderToString}) {
+  const prepared = renderMathMarkdown(text, {macros, renderToString});
+  return injectRenderedMath(prepared.text, prepared.replacements);
+}
+
 export function injectRenderedMath(html, replacements) {
   let result = html;
   for (const {token, html: replacementHtml} of replacements) {

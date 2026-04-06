@@ -9,20 +9,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const srcDir = path.join(__dirname, "src");
+const katexDir = path.join(__dirname, "katex");
 const viewerSrcDir = path.join(srcDir, "viewer");
-const katexPreSrcDir = path.join(__dirname, "..", "katex_pre", "src");
 const args = parseArgs(process.argv.slice(2));
 const outDir = args.outDir;
 const repositoryRoot = args.repositoryRoot;
 const katexDistDir = path.join(__dirname, "node_modules", "katex", "dist");
 const katexOutDir = path.join(outDir, "vendor", "katex");
 const pluginSettings = parsePluginSettings(process.env.WORKSPACE_FS_PLUGIN_SETTINGS_JSON);
+const transforms = normalizeModuleHooks(pluginSettings.md_preview?.transform, "transform");
 const enhancers = normalizeEnhancers(pluginSettings.md_preview?.enhance);
 const macrosSource = resolveMacrosSource(
   pluginSettings.md_preview?.macro_path ?? pluginSettings.md_preview?.macros_path,
   repositoryRoot,
 );
 const macrosOutPath = path.join(outDir, "macros.txt");
+const katexTransformSrcPath = path.join(katexDir, "katex_transform.js");
 
 await mkdir(outDir, {recursive: true});
 await mkdir(katexOutDir, {recursive: true});
@@ -31,7 +33,8 @@ await copyMacrosFile(macrosSource, macrosOutPath);
 await cp(path.join(katexDistDir, "katex.min.css"), path.join(katexOutDir, "katex.min.css"));
 await cp(path.join(katexDistDir, "fonts"), path.join(katexOutDir, "fonts"), {recursive: true});
 await cp(viewerSrcDir, outDir, {recursive: true});
-await cp(path.join(katexPreSrcDir, "katex_pre.css"), path.join(outDir, "katex_pre.css"));
+await cp(path.join(katexDir, "katex_pre.css"), path.join(outDir, "katex_pre.css"));
+await writeTransformRunner(path.join(outDir, "transform_runner.js"), transforms);
 await writeEnhanceRunner(path.join(outDir, "enhance_runner.js"), enhancers);
 await generateLinkIndex({outDir, repositoryRoot});
 
@@ -44,6 +47,19 @@ await build({
   outfile: path.join(outDir, "markdown_viewer.js"),
   sourcemap: false,
   logLevel: "info",
+  nodePaths: [path.join(__dirname, "node_modules")],
+});
+
+await build({
+  entryPoints: [katexTransformSrcPath],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  outfile: path.join(outDir, "katex_transform.js"),
+  sourcemap: false,
+  logLevel: "info",
+  nodePaths: [path.join(__dirname, "node_modules")],
 });
 
 function parseArgs(argv) {
@@ -115,22 +131,22 @@ function parsePluginSettings(text) {
   return value;
 }
 
-function normalizeEnhancers(rawEnhancers) {
+function normalizeModuleHooks(rawHooks, kind) {
   const values = [];
-  if (Array.isArray(rawEnhancers)) {
-    for (const rawEnhancer of rawEnhancers) {
-      if (!rawEnhancer || typeof rawEnhancer !== "object" || Array.isArray(rawEnhancer)) {
-        throw new Error("md_preview.enhance entries must be objects");
+  if (Array.isArray(rawHooks)) {
+    for (const rawHook of rawHooks) {
+      if (!rawHook || typeof rawHook !== "object" || Array.isArray(rawHook)) {
+        throw new Error(`md_preview.${kind} entries must be objects`);
       }
-      const {name, url, entrypoint, ...options} = rawEnhancer;
+      const {name, url, entrypoint, ...options} = rawHook;
       if (typeof name !== "string" || name.trim() === "") {
-        throw new Error("md_preview enhancer name must be a non-empty string");
+        throw new Error(`md_preview ${kind} name must be a non-empty string`);
       }
       if (typeof url !== "string" || url.trim() === "") {
-        throw new Error(`md_preview enhancer ${name} is missing url`);
+        throw new Error(`md_preview ${kind} ${name} is missing url`);
       }
       if (typeof entrypoint !== "string" || entrypoint.trim() === "") {
-        throw new Error(`md_preview enhancer ${name} is missing entrypoint`);
+        throw new Error(`md_preview ${kind} ${name} is missing entrypoint`);
       }
       values.push({
         name,
@@ -141,6 +157,37 @@ function normalizeEnhancers(rawEnhancers) {
     }
   }
   return values;
+}
+
+function normalizeEnhancers(rawEnhancers) {
+  return normalizeModuleHooks(rawEnhancers, "enhance");
+}
+
+async function writeTransformRunner(outputPath, transforms) {
+  const source = `const transformSpecs = ${JSON.stringify(transforms, null, 2)};
+
+let loadedTransformsPromise = null;
+
+export async function runTransforms(text, context = {}) {
+  const loadedTransforms = await loadTransforms();
+  let value = String(text ?? "");
+  for (const transform of loadedTransforms) {
+    const next = await transform(value, context);
+    value = String(next ?? "");
+  }
+  return value;
+}
+
+async function loadTransforms() {
+  if (!loadedTransformsPromise) {
+    loadedTransformsPromise = Promise.all(transformSpecs.map(spec => loadHook(spec, "transform")));
+  }
+  return loadedTransformsPromise;
+}
+
+${sharedHookLoaderSource()}
+`;
+  await writeFile(outputPath, source);
 }
 
 async function writeEnhanceRunner(outputPath, enhancers) {
@@ -157,27 +204,33 @@ export async function runEnhancers(root, context = {}) {
 
 async function loadEnhancers() {
   if (!loadedEnhancersPromise) {
-    loadedEnhancersPromise = Promise.all(enhancerSpecs.map(loadEnhancer));
+    loadedEnhancersPromise = Promise.all(enhancerSpecs.map(spec => loadHook(spec, "enhancer")));
   }
   return loadedEnhancersPromise;
 }
 
-async function loadEnhancer(spec) {
+${sharedHookLoaderSource()}
+`;
+  await writeFile(outputPath, source);
+}
+
+function sharedHookLoaderSource() {
+  return `async function loadHook(spec, kind) {
   const mod = await import(spec.url);
   const createEnhancer = spec.entrypoint === "default"
     ? mod.default
     : mod[spec.entrypoint];
   if (typeof createEnhancer !== "function") {
-    throw new Error(\`enhancer \${spec.name} does not export \${spec.entrypoint}\`);
+    throw new Error(\`\${kind} \${spec.name} does not export \${spec.entrypoint}\`);
   }
-  const enhance = createEnhancer({
+  const hook = createEnhancer({
     ...(spec.options || {}),
     bundleBaseUrl: baseUrlFromModuleUrl(spec.url),
   });
-  if (typeof enhance !== "function") {
-    throw new Error(\`enhancer \${spec.name} did not return a function\`);
+  if (typeof hook !== "function") {
+    throw new Error(\`\${kind} \${spec.name} did not return a function\`);
   }
-  return enhance;
+  return hook;
 }
 
 function baseUrlFromModuleUrl(value) {
@@ -188,7 +241,5 @@ function baseUrlFromModuleUrl(value) {
   url.search = "";
   url.hash = "";
   return url.href;
-}
-`;
-  await writeFile(outputPath, source);
+}`;
 }

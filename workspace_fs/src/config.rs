@@ -626,6 +626,11 @@ trigger = "manual"
 [plugin.md_preview]
 enabled = true
 
+[[plugin.md_preview.transform]]
+name = "katex"
+url = "{MOUNT_MD_PREVIEW}katex_transform.js"
+entrypoint = "default"
+
 [[plugin.md_preview.enhance]]
 name = "embedded-models"
 url = "{MOUNT_BUILD_WASM}enhance.js"
@@ -637,6 +642,14 @@ entrypoint = "default"
         let plugin = &config.plugin[0];
         let md_preview = plugin.extra.get("md_preview").unwrap().as_table().unwrap();
         assert_eq!(md_preview.get("enabled").unwrap().as_bool(), Some(true));
+
+        let transforms = md_preview.get("transform").unwrap().as_array().unwrap();
+        let transform = transforms[0].as_table().unwrap();
+        assert_eq!(transform.get("name").unwrap().as_str(), Some("katex"));
+        assert_eq!(
+            transform.get("entrypoint").unwrap().as_str(),
+            Some("default")
+        );
 
         let enhancers = md_preview.get("enhance").unwrap().as_array().unwrap();
         let enhancer = enhancers[0].as_table().unwrap();

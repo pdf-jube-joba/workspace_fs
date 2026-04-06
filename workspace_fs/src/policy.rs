@@ -105,6 +105,10 @@ pub fn inspect_policy_rules(rules: &[Policy], path: &WorkspacePath) -> Result<Po
 }
 
 fn policy_matches(rule_path: &WorkspacePath, requested_path: &WorkspacePath) -> bool {
+    if rule_path.as_str() == "." {
+        return true;
+    }
+
     if rule_path.is_directory() {
         requested_path.starts_with(rule_path)
     } else {
@@ -189,6 +193,28 @@ mod tests {
         assert_eq!(
             resolve_policy(MethodKind::Get, &rules, &workspace_path("/notes/a.md")).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn root_policy_applies_recursively() {
+        let rules = vec![Policy {
+            path: WorkspacePath::from_path_str(".").unwrap(),
+            permissions: PolicyPermissions {
+                get: true,
+                post: false,
+                put: false,
+                delete: false,
+            },
+        }];
+
+        assert_eq!(
+            resolve_policy(MethodKind::Get, &rules, &workspace_path("/folder1/")).unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            resolve_policy(MethodKind::Get, &rules, &workspace_path("/folder1/test1.md")).unwrap(),
+            Some(true)
         );
     }
 

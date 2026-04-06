@@ -1,11 +1,6 @@
-import katex from "katex";
 import remarkRehype from "remark-rehype";
 import rehypeStringify from "rehype-stringify";
-import {
-  fromText,
-  injectRenderedMath,
-  renderMathMarkdown,
-} from "../../katex_pre/src/katex_pre.js";
+import {fromText} from "../katex/katex_pre.js";
 import {createMarkdownParser, prepareMarkdownSource} from "./markdown_extensions.js";
 import {createRemarkRehypeOptions} from "./markdown_to_hast.js";
 
@@ -18,20 +13,15 @@ export async function renderMarkdownToElement({text, element, basePath = "", mac
 }
 
 export async function renderMarkdownToHtml({text, basePath = "", macros = {}}) {
-  const prepared = renderMathMarkdown(text, {
-    macros,
-    renderToString(value, options) {
-      return katex.renderToString(value, options);
-    },
-  });
+  const transformed = await runConfiguredTransforms(text, {basePath, macros});
   const processor = createMarkdownParser()
     .use(remarkRehype, createRemarkRehypeOptions({
       basePath,
     }))
     .use(rehypeStringify, {allowDangerousHtml: true});
 
-  const file = await processor.process(prepareMarkdownSource(prepared.text));
-  return injectRenderedMath(String(file), prepared.replacements);
+  const file = await processor.process(prepareMarkdownSource(transformed));
+  return String(file);
 }
 
 export function from_text(text) {
@@ -39,6 +29,16 @@ export function from_text(text) {
 }
 
 let enhanceRunnerPromise = null;
+let transformRunnerPromise = null;
+
+async function runConfiguredTransforms(text, context) {
+  if (!transformRunnerPromise) {
+    const transformRunnerUrl = new URL("./transform_runner.js", import.meta.url);
+    transformRunnerPromise = import(transformRunnerUrl.href);
+  }
+  const {runTransforms} = await transformRunnerPromise;
+  return runTransforms(text, context);
+}
 
 async function runConfiguredEnhancers(root, context) {
   if (!enhanceRunnerPromise) {
