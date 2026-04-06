@@ -5,6 +5,7 @@ use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use tokio::process::Command;
 
@@ -277,8 +278,9 @@ impl<'a> PluginRunner<'a> {
             .await
             .context("failed to create plugin cache directory")?;
 
-        let program = expand_placeholder(&plugin.command[0], &context, trigger)?;
-        let args = plugin.command[1..]
+        let plugin_command = resolve_plugin_command(plugin)?;
+        let program = expand_placeholder(&plugin_command[0], &context, trigger)?;
+        let args = plugin_command[1..]
             .iter()
             .map(|arg| expand_placeholder(arg, &context, trigger))
             .collect::<Result<Vec<_>>>()?;
@@ -338,6 +340,44 @@ impl<'a> PluginRunner<'a> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct DefaultPluginConfig {
+    #[serde(default)]
+    plugin: Vec<DefaultPluginDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DefaultPluginDefinition {
+    name: String,
+    command: Vec<String>,
+}
+
+fn resolve_plugin_command(plugin: &PluginConfig) -> Result<Vec<String>> {
+    match plugin.runner.as_str() {
+        "command" => Ok(plugin.command.clone()),
+        "default" => resolve_default_plugin_command(&plugin.name),
+        _ => bail!("unsupported plugin runner: {}", plugin.runner),
+    }
+}
+
+fn resolve_default_plugin_command(plugin_name: &str) -> Result<Vec<String>> {
+    let default_config_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("default.toml");
+    let text = std::fs::read_to_string(default_config_path.as_std_path())
+        .context("failed to read workspace_fs/default.toml")?;
+    let config: DefaultPluginConfig =
+        toml::from_str(&text).context("failed to parse workspace_fs/default.toml")?;
+
+    let definition = config
+        .plugin
+        .iter()
+        .find(|definition| definition.name == plugin_name)
+        .with_context(|| format!("default plugin not found: {plugin_name}"))?;
+    if definition.command.is_empty() {
+        bail!("default plugin command must not be empty: {plugin_name}");
+    }
+    Ok(definition.command.clone())
+}
+
 fn plugin_matches_path(plugin: &PluginConfig, path: &WorkspacePath) -> bool {
     let Some(plugin_path) = &plugin.path else {
         return false;
@@ -381,11 +421,15 @@ fn expand_placeholder(
         ("{PLUGIN_NAME}", context.plugin_name.as_str()),
         ("{OUTPOST_DIRECTORY}", context.output_directory.as_str()),
         ("{OUTPUT_DIRECTORY}", context.output_directory.as_str()),
+        ("{WORKSPACE_FS_ROOT}", env!("CARGO_MANIFEST_DIR")),
     ];
 
     for (from, to) in replacements {
         value = value.replace(from, to);
     }
+    let default_plugins_root =
+        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../default_plugins");
+    value = value.replace("{DEFAULT_PLUGINS_ROOT}", default_plugins_root.as_str());
     if let Some(mount_url) = &context.mount_url {
         value = value.replace("{MOUNT_URL}", mount_url);
     }
@@ -538,6 +582,18 @@ mod tests {
             mount: Some("/plugin-assets/".into()),
             extra,
         }
+    }
+
+    #[test]
+    fn resolve_default_plugin_command_reads_default_toml() {
+        let command = resolve_default_plugin_command("md-preview").unwrap();
+
+        assert_eq!(command[0], "node");
+        assert!(
+            command
+                .iter()
+                .any(|arg| arg.contains("md_preview/build.mjs"))
+        );
     }
 
     #[test]

@@ -17,7 +17,15 @@ const repositoryRoot = args.repositoryRoot;
 const katexDistDir = path.join(__dirname, "node_modules", "katex", "dist");
 const katexOutDir = path.join(outDir, "vendor", "katex");
 const pluginSettings = parsePluginSettings(process.env.WORKSPACE_FS_PLUGIN_SETTINGS_JSON);
-const transforms = normalizeModuleHooks(pluginSettings.md_preview?.transform, "transform");
+const transforms = [
+  {
+    name: "katex",
+    url: "./katex_transform.js",
+    entrypoint: "default",
+    options: {},
+  },
+  ...normalizeModuleHooks(pluginSettings.md_preview?.transform, "transform"),
+];
 const enhancers = normalizeEnhancers(pluginSettings.md_preview?.enhance);
 const macrosSource = resolveMacrosSource(
   pluginSettings.md_preview?.macro_path ?? pluginSettings.md_preview?.macros_path,

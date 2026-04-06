@@ -27,6 +27,14 @@ cargo run --bin workspace_fs -- ./test-repository --task-only build
 - `--task-only <name>` は task 実行後に serve せず終了する。`--task <name>` と同時指定は不可。
 - plugin の依存関係に入っているものを含めて実行するが、 `--skip-deps` で依存関係を実行しないようにできる。
 
+この repository 自体を submodule として使う場合は、repository root の `Makefile` 経由でも起動できる。
+```bash
+make install
+make build example_repository
+make serve ../md_dir
+```
+`make serve REPO=../md_dir` のようにも指定できる。
+
 起動時には読み込んだ serve 設定をログに出す。
 また、各リクエストについて method, path, status code をログに出す。
 
@@ -175,6 +183,20 @@ name = "md_preview"
 enhance = true
 ```
 とか
+
+default plugin は `workspace_fs/default.toml` に実行方法を定義しておき、 repository 側では `runner = "default"` と書く。
+この場合、 repository 側の `command` は書かない。
+`[plugin.<name>]` などの plugin 固有設定は `.repo/config.toml` 側から引き続き読み込まれ、通常の command plugin と同じく `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` に渡される。
+```
+[[plugin]]
+name = "md-preview"
+runner = "default"
+trigger = "manual"
+mount = "/md/"
+
+[plugin.md_preview]
+enhance = []
+```
 
 ### task
 plugin をどの順番に実行するかを書いて、起動時に指定する。

@@ -1,0 +1,3 @@
+[[plugin]]
+name = "md-preview"
+command = ["node", "{DEFAULT_PLUGINS_ROOT}/md_preview/build.mjs", "--out-dir", "{OUTPUT_DIRECTORY}"]

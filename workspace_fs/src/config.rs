@@ -95,6 +95,7 @@ impl PolicyPermissions {
 pub struct PluginConfig {
     pub name: String,
     pub runner: String,
+    #[serde(default)]
     pub command: Vec<String>,
     pub trigger: String,
     #[serde(default, deserialize_with = "deserialize_optional_workspace_path")]
@@ -208,11 +209,14 @@ impl RepositoryConfig {
                     plugin.name
                 );
             }
-            if plugin.runner != "command" {
+            if plugin.runner != "command" && plugin.runner != "default" {
                 bail!("unsupported plugin runner: {}", plugin.runner);
             }
-            if plugin.command.is_empty() {
+            if plugin.runner == "command" && plugin.command.is_empty() {
                 bail!("plugin command must not be empty");
+            }
+            if plugin.runner == "default" && !plugin.command.is_empty() {
+                bail!("default plugin must not set command: {}", plugin.name);
             }
             if let Some(path) = &plugin.path {
                 if contains_glob_metachar(path.as_str()) {
@@ -609,6 +613,56 @@ GET = true
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
 
         assert!(error.to_string().contains("plugin dependency not found"));
+    }
+
+    #[test]
+    fn repository_config_accepts_default_plugin_without_command() {
+        let config = RepositoryConfig {
+            name: "repo".into(),
+            serve: ServeSettings::default(),
+            policy: Vec::new(),
+            plugin: vec![PluginConfig {
+                name: "preview".into(),
+                runner: "default".into(),
+                command: Vec::new(),
+                trigger: "manual".into(),
+                path: None,
+                deps: Vec::new(),
+                mount: None,
+                extra: Default::default(),
+            }],
+            task: Vec::new(),
+        };
+
+        config.validate(Utf8Path::new(".")).unwrap();
+    }
+
+    #[test]
+    fn repository_config_rejects_default_plugin_command_override() {
+        let config = RepositoryConfig {
+            name: "repo".into(),
+            serve: ServeSettings::default(),
+            policy: Vec::new(),
+            plugin: vec![PluginConfig {
+                name: "preview".into(),
+                runner: "default".into(),
+                command: vec!["echo".into()],
+                trigger: "manual".into(),
+                path: None,
+                deps: Vec::new(),
+                mount: None,
+                extra: Default::default(),
+            }],
+            task: Vec::new(),
+        };
+
+        let error = config.validate(Utf8Path::new(".")).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("default plugin must not set command")
+        );
     }
 
     #[test]

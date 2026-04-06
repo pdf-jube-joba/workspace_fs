@@ -213,7 +213,12 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            resolve_policy(MethodKind::Get, &rules, &workspace_path("/folder1/test1.md")).unwrap(),
+            resolve_policy(
+                MethodKind::Get,
+                &rules,
+                &workspace_path("/folder1/test1.md")
+            )
+            .unwrap(),
             Some(true)
         );
     }

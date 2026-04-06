@@ -6,13 +6,13 @@ The build script requires `--out-dir <path>` and writes all generated files unde
 It generates `link_index.json` alongside the browser assets by scanning all repository markdown files.
 The built output includes the viewer HTML/CSS/JS from `src/viewer/`.
 It also copies the bundled KaTeX stylesheet wrapper from `katex/katex_pre.css`.
-When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[[plugin.md_preview.transform]]`, `build.mjs` also generates `transform_runner.js` from those entries.
+The built output includes a default KaTeX transform for math written as `\(...\)` / `\[...\]`.
+When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[[plugin.md_preview.transform]]`, `build.mjs` appends those source transforms after the default KaTeX transform.
 When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[plugin.md_preview]`, `build.mjs` also generates `enhance_runner.js` from `[[plugin.md_preview.enhance]]`.
 Set `[plugin.md_preview].macro_path` to copy a repository-local macros file into the built output as `macros.txt`. If it is omitted, no `macros.txt` is generated.
 When used through `workspace_fs`, mount the plugin output at any prefix and open the generated viewer files from that mount.
 It renders markdown to HTML in the browser with `remark` / `rehype`.
 It can apply configured source transforms before markdown parsing.
-The bundled `katex_transform.js` in `katex/` can be loaded via `[[plugin.md_preview.transform]]` to render KaTeX-style math written as `\(...\)` / `\[...\]`.
 GitHub-style alerts such as `> [!NOTE]` and `> [!TIP]` are converted to custom HTML blocks.
 KaTeX macros are not loaded implicitly by the viewer.
 Callers are expected to load `macros.txt`, convert it with `from_text(text)`, and pass the result as `macros`.
