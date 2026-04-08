@@ -130,6 +130,7 @@ impl WorkspaceService {
         user_identity: &UserIdentity,
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
+        self.enforce_not_ignored(&path)?;
         self.enforce_policy(MethodKind::Get, &path)?;
 
         if path.is_directory() {
@@ -167,6 +168,7 @@ impl WorkspaceService {
         user_identity: &UserIdentity,
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
+        self.enforce_not_ignored(&path)?;
         self.enforce_policy(MethodKind::Post, &path)?;
 
         if path.is_directory() {
@@ -205,6 +207,7 @@ impl WorkspaceService {
         user_identity: &UserIdentity,
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
+        self.enforce_not_ignored(&path)?;
         self.enforce_policy(MethodKind::Put, &path)?;
         reject_directory_path(&path, "cannot update a directory path with PUT")?;
 
@@ -228,6 +231,7 @@ impl WorkspaceService {
         user_identity: &UserIdentity,
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
+        self.enforce_not_ignored(&path)?;
         self.enforce_policy(MethodKind::Delete, &path)?;
 
         if path.is_directory() {
@@ -271,6 +275,7 @@ impl WorkspaceService {
 
     pub async fn get_path_info(&self, url_path: &str) -> Result<Json<PathInfo>, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
+        self.enforce_not_ignored(&path)?;
         self.enforce_policy(MethodKind::Get, &path)?;
 
         let info = self.repository.path_info(&path).await.map_err(|error| {
@@ -310,6 +315,7 @@ impl WorkspaceService {
                 return Err(mapped);
             }
         };
+        let entries = self.filter_ignored_entries(path, entries)?;
         self.run_trigger(PluginTrigger::Get, path, user_identity)
             .await?;
         Ok(text_response(StatusCode::OK, entries.join("\n")))
@@ -362,6 +368,43 @@ impl WorkspaceService {
         } else {
             Err(WorkspaceError::forbidden("operation denied by policy"))
         }
+    }
+
+    fn enforce_not_ignored(&self, path: &WorkspacePath) -> Result<(), WorkspaceError> {
+        if self.is_ignored_path(path) {
+            Err(WorkspaceError::forbidden("path ignored by config"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn is_ignored_path(&self, path: &WorkspacePath) -> bool {
+        self.config
+            .ignore
+            .paths
+            .iter()
+            .any(|ignored| path.as_str() == ignored.as_str() || path.starts_with(ignored))
+    }
+
+    fn filter_ignored_entries(
+        &self,
+        directory: &WorkspacePath,
+        entries: Vec<String>,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        entries
+            .into_iter()
+            .map(|entry| {
+                let path = child_path(directory, &entry).map_err(WorkspaceError::internal)?;
+                Ok((entry, path))
+            })
+            .filter(|result| {
+                result
+                    .as_ref()
+                    .map(|(_, path)| !self.is_ignored_path(path))
+                    .unwrap_or(true)
+            })
+            .map(|result| result.map(|(entry, _)| entry))
+            .collect()
     }
 
     fn resolve_policy(&self, method: MethodKind, path: &WorkspacePath) -> Result<Option<bool>> {
@@ -469,6 +512,14 @@ fn reject_directory_path(
     Ok(())
 }
 
+fn child_path(directory: &WorkspacePath, entry: &str) -> Result<WorkspacePath> {
+    if directory.as_str() == "." {
+        WorkspacePath::from_path_str(entry)
+    } else {
+        WorkspacePath::from_path_str(&format!("{}/{entry}", directory.as_str()))
+    }
+}
+
 fn map_path_error(error: anyhow::Error) -> WorkspaceError {
     let message = error.to_string();
     if message.contains("path escapes repository root")
@@ -513,9 +564,44 @@ fn error_chain_contains(error: &anyhow::Error, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use axum::{body::to_bytes, http::header::CONTENT_TYPE};
+    use camino::Utf8PathBuf;
 
     use super::*;
+    use crate::config::{IgnoreConfig, Policy, PolicyPermissions, ServeSettings, TaskConfig};
     use crate::info::{PathInfo, PathInfoKind};
+
+    fn test_config_with_ignore(paths: Vec<WorkspacePath>) -> RepositoryConfig {
+        RepositoryConfig {
+            name: "repo".into(),
+            serve: ServeSettings::default(),
+            policy: vec![Policy {
+                path: WorkspacePath::from_path_str(".").unwrap(),
+                permissions: PolicyPermissions {
+                    get: true,
+                    post: false,
+                    put: false,
+                    delete: false,
+                },
+            }],
+            ignore: IgnoreConfig { paths },
+            plugin: Vec::new(),
+            task: Vec::<TaskConfig>::new(),
+        }
+    }
+
+    fn unique_temp_dir(name: &str) -> Utf8PathBuf {
+        let unique = format!(
+            "workspace-fs-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&path).unwrap();
+        Utf8PathBuf::from_path_buf(path).unwrap()
+    }
 
     #[tokio::test]
     async fn file_response_uses_html_mime_and_binary_body() {
@@ -549,5 +635,36 @@ mod tests {
         let info = PathInfo::new("docs", PathInfoKind::Directory, None, None, false);
 
         assert_eq!(info.kind, PathInfoKind::Directory);
+    }
+
+    #[tokio::test]
+    async fn ignore_hides_listing_entries_and_rejects_direct_access() {
+        let root = unique_temp_dir("ignore");
+        std::fs::create_dir(root.join(".git").as_std_path()).unwrap();
+        std::fs::write(root.join("LICENSE").as_std_path(), "license").unwrap();
+        std::fs::write(root.join("README.md").as_std_path(), "readme").unwrap();
+
+        let config = Arc::new(test_config_with_ignore(vec![
+            WorkspacePath::from_path_str(".git").unwrap(),
+            WorkspacePath::from_path_str("LICENSE").unwrap(),
+        ]));
+        let repository = Arc::new(FsRepository::open(&root, &config).unwrap());
+        let workspace = WorkspaceService::new(repository, config);
+        let user = UserIdentity::new("");
+
+        let response = workspace.get_root(&user).await.unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let listing = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(listing.contains("README.md"));
+        assert!(!listing.contains(".git/"));
+        assert!(!listing.contains("LICENSE"));
+
+        let git_error = workspace.get_path("/.git/", &user).await.unwrap_err();
+        assert_eq!(git_error.status, StatusCode::FORBIDDEN);
+        let license_error = workspace.get_path("/LICENSE", &user).await.unwrap_err();
+        assert_eq!(license_error.status, StatusCode::FORBIDDEN);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

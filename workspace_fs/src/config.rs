@@ -12,6 +12,8 @@ pub struct RepositoryConfig {
     #[serde(default)]
     pub policy: Vec<Policy>,
     #[serde(default)]
+    pub ignore: IgnoreConfig,
+    #[serde(default)]
     pub plugin: Vec<PluginConfig>,
     #[serde(default)]
     pub task: Vec<TaskConfig>,
@@ -66,6 +68,12 @@ pub struct Policy {
     pub path: WorkspacePath,
     #[serde(flatten)]
     pub permissions: PolicyPermissions,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IgnoreConfig {
+    #[serde(default, deserialize_with = "deserialize_workspace_paths")]
+    pub paths: Vec<WorkspacePath>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -202,6 +210,21 @@ impl RepositoryConfig {
             }
         }
 
+        for path in &self.ignore.paths {
+            if path.as_str() == "." {
+                bail!("ignore path must not target repository root");
+            }
+            if contains_glob_metachar(path.as_str()) {
+                bail!("ignore path must not use glob syntax");
+            }
+            if path.is_reserved() {
+                bail!("ignore path must not target .repo/");
+            }
+            if path_uses_reserved_url_prefix(path, &reserved_url_prefix_paths) {
+                bail!("ignore path must not target reserved url prefix");
+            }
+        }
+
         for plugin in &self.plugin {
             if !is_valid_plugin_name(&plugin.name) {
                 bail!(
@@ -309,6 +332,19 @@ where
     WorkspacePath::from_path_str(&value).map_err(serde::de::Error::custom)
 }
 
+fn deserialize_workspace_paths<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<WorkspacePath>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<String>::deserialize(deserializer)?;
+    values
+        .into_iter()
+        .map(|value| WorkspacePath::from_path_str(&value).map_err(serde::de::Error::custom))
+        .collect()
+}
+
 fn deserialize_optional_workspace_path<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<WorkspacePath>, D::Error>
@@ -409,6 +445,30 @@ GET = true
     }
 
     #[test]
+    fn repository_config_loads_ignore_paths() {
+        let config = RepositoryConfig::load_toml(
+            r#"
+name = "repo"
+
+[ignore]
+paths = [
+  ".git",
+  "LICENSE",
+]
+"#,
+        )
+        .unwrap();
+
+        let paths = config
+            .ignore
+            .paths
+            .iter()
+            .map(WorkspacePath::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec![".git", "LICENSE"]);
+    }
+
+    #[test]
     fn repository_config_rejects_prefix_without_leading_slash() {
         let config = RepositoryConfig {
             name: "repo".into(),
@@ -419,6 +479,7 @@ GET = true
                 info_url_prefix: "/.info".into(),
             },
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
             task: Vec::new(),
         };
@@ -443,6 +504,7 @@ GET = true
                 info_url_prefix: "/.info".into(),
             },
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
             task: Vec::new(),
         };
@@ -465,6 +527,7 @@ GET = true
                 info_url_prefix: "/.policy".into(),
             },
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
             task: Vec::new(),
         };
@@ -522,6 +585,7 @@ GET = true
                     delete: false,
                 },
             }],
+            ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
             task: Vec::new(),
         };
@@ -544,6 +608,7 @@ GET = true
                 path: WorkspacePath::from_path_str("assets/").unwrap(),
                 permissions: PolicyPermissions::deny_all(),
             }],
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "assets".into(),
                 runner: "command".into(),
@@ -573,6 +638,7 @@ GET = true
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "bad.name".into(),
                 runner: "command".into(),
@@ -597,6 +663,7 @@ GET = true
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "preview".into(),
                 runner: "command".into(),
@@ -621,6 +688,7 @@ GET = true
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "preview".into(),
                 runner: "default".into(),
@@ -643,6 +711,7 @@ GET = true
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "preview".into(),
                 runner: "default".into(),
@@ -731,6 +800,7 @@ entrypoint = "default"
                     delete: false,
                 },
             }],
+            ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
             task: Vec::new(),
         };
@@ -750,6 +820,7 @@ entrypoint = "default"
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "preview".into(),
                 runner: "command".into(),
@@ -778,6 +849,7 @@ entrypoint = "default"
             name: "repo".into(),
             serve: ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![PluginConfig {
                 name: "preview".into(),
                 runner: "command".into(),

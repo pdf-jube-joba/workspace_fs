@@ -553,6 +553,7 @@ fn _task_reference(_task: &TaskConfig) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::IgnoreConfig;
 
     fn plugin_context(path: Option<&str>) -> PluginContext {
         PluginContext {
@@ -723,6 +724,7 @@ mod tests {
             name: "repo".into(),
             serve: crate::config::ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![
                 PluginConfig {
                     name: "build-wasm".into(),
@@ -767,6 +769,7 @@ mod tests {
             name: "repo".into(),
             serve: crate::config::ServeSettings::default(),
             policy: Vec::new(),
+            ignore: IgnoreConfig::default(),
             plugin: vec![
                 PluginConfig {
                     name: "build-wasm".into(),
