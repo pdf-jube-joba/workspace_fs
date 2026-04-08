@@ -20,8 +20,18 @@ HTTP リクエスト経由でディレクトリの編集を行う。
 ## 起動方法
 
 ```bash
-cargo run --bin workspace_fs -- ./test-repository
+cargo run --manifest-path workspace_fs/Cargo.toml -- ./test-repository
 ```
+
+submodule として `computation/workspace_fs` に置いている場合:
+
+```bash
+cargo run --manifest-path workspace_fs/Cargo.toml -- ../
+cargo run --manifest-path workspace_fs/Cargo.toml -- ../ --task build
+cargo run --manifest-path workspace_fs/Cargo.toml -- ../ --task-only build
+```
+
+Makefile は plugin 依存の install 用にだけ使う。
 
 起動時には読み込んだ serve 設定をログに出す。
 また、各リクエストについて method, path, status code をログに出す。
