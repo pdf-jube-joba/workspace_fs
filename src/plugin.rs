@@ -363,9 +363,9 @@ fn resolve_plugin_command(plugin: &PluginConfig) -> Result<Vec<String>> {
 fn resolve_default_plugin_command(plugin_name: &str) -> Result<Vec<String>> {
     let default_config_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("default.toml");
     let text = std::fs::read_to_string(default_config_path.as_std_path())
-        .context("failed to read workspace_fs/default.toml")?;
+        .context("failed to read _wfs/default.toml")?;
     let config: DefaultPluginConfig =
-        toml::from_str(&text).context("failed to parse workspace_fs/default.toml")?;
+        toml::from_str(&text).context("failed to parse _wfs/default.toml")?;
 
     let definition = config
         .plugin
@@ -428,7 +428,7 @@ fn expand_placeholder(
         value = value.replace(from, to);
     }
     let default_plugins_root =
-        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../default_plugins");
+        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("default_plugins");
     value = value.replace("{DEFAULT_PLUGINS_ROOT}", default_plugins_root.as_str());
     if let Some(mount_url) = &context.mount_url {
         value = value.replace("{MOUNT_URL}", mount_url);

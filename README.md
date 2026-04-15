@@ -184,7 +184,7 @@ enhance = true
 ```
 とか
 
-default plugin は `workspace_fs/default.toml` に実行方法を定義しておき、 repository 側では `runner = "default"` と書く。
+default plugin は `_wfs/default.toml` に実行方法を定義しておき、 repository 側では `runner = "default"` と書く。
 この場合、 repository 側の `command` は書かない。
 `[plugin.<name>]` などの plugin 固有設定は `.repo/config.toml` 側から引き続き読み込まれ、通常の command plugin と同じく `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` に渡される。
 ```
