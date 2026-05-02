@@ -1,7 +1,5 @@
 # workspace_fs_client
 
-テスト
-
 `workspace_fs_client` は local HTTP proxy と task runner です。`REPOSITORY/.repo/user.toml` を読み、`repository.port` ごとに browser 向けの入口を立てます。`mode = "spawn"` の repository は必要に応じて local server も起動します。path を省略すると cwd を使います。
 
 ## 起動
