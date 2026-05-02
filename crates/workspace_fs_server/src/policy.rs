@@ -3,6 +3,7 @@ use serde::Serialize;
 
 use crate::{
     config::{Policy, PolicyPermissions},
+    identity::UserIdentity,
     path::WorkspacePath,
 };
 
@@ -41,15 +42,25 @@ pub fn resolve_policy(
     method: MethodKind,
     rules: &[Policy],
     path: &WorkspacePath,
+    user_identity: &UserIdentity,
 ) -> Result<Option<bool>> {
     let inspection = inspect_policy_rules(rules, path)?;
-    Ok(Some(match method {
-        MethodKind::Get => inspection.effective.get,
-        MethodKind::Post => inspection.effective.post,
-        MethodKind::Put => inspection.effective.put,
-        MethodKind::Delete => inspection.effective.delete,
-    })
-    .filter(|allowed| *allowed || inspection.selected.is_some()))
+    let Some(_) = inspection.selected else {
+        return Ok(None);
+    };
+
+    let allow = match method {
+        MethodKind::Get => &inspection.effective.get,
+        MethodKind::Post => &inspection.effective.post,
+        MethodKind::Put => &inspection.effective.put,
+        MethodKind::Delete => &inspection.effective.delete,
+    };
+
+    Ok(Some(
+        allow
+            .iter()
+            .any(|candidate| candidate == user_identity.as_str()),
+    ))
 }
 
 pub fn inspect_policy_rules(rules: &[Policy], path: &WorkspacePath) -> Result<PolicyInspection> {
@@ -135,10 +146,10 @@ mod tests {
             Policy {
                 path: WorkspacePath::from_path_str("docs/public/").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             },
         ];
@@ -147,7 +158,8 @@ mod tests {
             resolve_policy(
                 MethodKind::Get,
                 &rules,
-                &workspace_path("/docs/public/index.md")
+                &workspace_path("/docs/public/index.md"),
+                &UserIdentity::new("alice_browser")
             )
             .unwrap(),
             Some(true)
@@ -160,10 +172,10 @@ mod tests {
             Policy {
                 path: WorkspacePath::from_path_str("docs/").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             },
             Policy {
@@ -173,7 +185,13 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_policy(MethodKind::Get, &rules, &workspace_path("/docs/a.md")).unwrap(),
+            resolve_policy(
+                MethodKind::Get,
+                &rules,
+                &workspace_path("/docs/a.md"),
+                &UserIdentity::new("alice_browser")
+            )
+            .unwrap(),
             Some(false)
         );
     }
@@ -183,15 +201,21 @@ mod tests {
         let rules = vec![Policy {
             path: WorkspacePath::from_path_str("docs/").unwrap(),
             permissions: PolicyPermissions {
-                get: true,
-                post: false,
-                put: false,
-                delete: false,
+                get: vec!["alice_browser".into()],
+                post: Vec::new(),
+                put: Vec::new(),
+                delete: Vec::new(),
             },
         }];
 
         assert_eq!(
-            resolve_policy(MethodKind::Get, &rules, &workspace_path("/notes/a.md")).unwrap(),
+            resolve_policy(
+                MethodKind::Get,
+                &rules,
+                &workspace_path("/notes/a.md"),
+                &UserIdentity::new("alice_browser")
+            )
+            .unwrap(),
             None
         );
     }
@@ -201,22 +225,29 @@ mod tests {
         let rules = vec![Policy {
             path: WorkspacePath::from_path_str(".").unwrap(),
             permissions: PolicyPermissions {
-                get: true,
-                post: false,
-                put: false,
-                delete: false,
+                get: vec!["alice_browser".into()],
+                post: Vec::new(),
+                put: Vec::new(),
+                delete: Vec::new(),
             },
         }];
 
         assert_eq!(
-            resolve_policy(MethodKind::Get, &rules, &workspace_path("/folder1/")).unwrap(),
+            resolve_policy(
+                MethodKind::Get,
+                &rules,
+                &workspace_path("/folder1/"),
+                &UserIdentity::new("alice_browser")
+            )
+            .unwrap(),
             Some(true)
         );
         assert_eq!(
             resolve_policy(
                 MethodKind::Get,
                 &rules,
-                &workspace_path("/folder1/test1.md")
+                &workspace_path("/folder1/test1.md"),
+                &UserIdentity::new("alice_browser")
             )
             .unwrap(),
             Some(true)
@@ -229,10 +260,10 @@ mod tests {
             Policy {
                 path: WorkspacePath::from_path_str("docs/private/a.md").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: true,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: vec!["alice_cli".into()],
+                    delete: Vec::new(),
                 },
             },
             Policy {
@@ -248,6 +279,6 @@ mod tests {
         let selected = inspection.selected.unwrap();
         assert_eq!(selected.path.as_str(), "docs/private/a.md");
         assert_eq!(selected.reason, "first_match");
-        assert!(inspection.effective.get);
+        assert_eq!(inspection.effective.get, vec!["alice_browser"]);
     }
 }

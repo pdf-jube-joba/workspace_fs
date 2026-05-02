@@ -1,5 +1,5 @@
 import {renderMarkdownToElement} from "./markdown_viewer.js";
-import {currentFileUrl, fetchTextFile, loadMacros, normalizePath, requestHeaders} from "./markdown_runtime.js";
+import {currentFileUrl, fetchTextFile, loadMacros, normalizePath} from "./markdown_runtime.js";
 import {applyTheme, detectNavigationMode, directoryViewHref, parentDirectoryPath, previewHref} from "./viewer_common.js";
 
 const preview = document.querySelector("#preview");
@@ -96,7 +96,6 @@ async function saveFile() {
     const response = await fetch(currentFileUrl(currentPath), {
       method: "PUT",
       headers: {
-        ...requestHeaders(),
         "Content-Type": "text/plain; charset=utf-8",
       },
       body: editor.value,

@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{HeaderMap, Method, StatusCode},
+    http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -57,16 +57,9 @@ pub async fn capture_identity(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    let method = request.method().clone();
-    let user = UserIdentity::from_headers(request.headers());
-
-    let Some(user) = user.filter(|value| !value.is_empty()).or_else(|| {
-        if method == Method::GET {
-            Some(UserIdentity::new(""))
-        } else {
-            None
-        }
-    }) else {
+    let Some(user) =
+        UserIdentity::from_headers(request.headers()).filter(|value| !value.is_empty())
+    else {
         return (StatusCode::BAD_REQUEST, "missing user-identity header").into_response();
     };
 
@@ -104,13 +97,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_allows_missing_user_identity() {
+    async fn get_requires_user_identity() {
         let response = app()
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -127,5 +120,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn get_accepts_user_identity() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("user-identity", "alice_browser")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

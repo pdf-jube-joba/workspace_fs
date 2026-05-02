@@ -345,7 +345,7 @@ impl Repository for FsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{IgnoreConfig, ServeSettings, TaskConfig};
+    use crate::config::{IgnoreConfig, ServeSettings};
 
     fn test_config() -> RepositoryConfig {
         RepositoryConfig {
@@ -354,7 +354,6 @@ mod tests {
             policy: Vec::new(),
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::<TaskConfig>::new(),
         }
     }
 

@@ -14,7 +14,7 @@ use crate::{
     identity::UserIdentity,
     info::PathInfo,
     path::WorkspacePath,
-    plugin::{PluginRunner, PluginTrigger},
+    plugin::PluginRunner,
     policy::{MethodKind, PolicyInspection, inspect_policy_rules, resolve_policy},
     repository::{FsRepository, Repository},
 };
@@ -94,18 +94,26 @@ impl WorkspaceService {
         self.repository.repository_root()
     }
 
-    pub async fn run_task(&self, task_name: &str, skip_deps: bool) -> Result<()> {
-        self.plugin_runner().run_task(task_name, skip_deps).await
-    }
-
-    pub async fn run_manual_plugin(
+    pub async fn run_plugin(
         &self,
         plugin_name: &str,
         user_identity: &UserIdentity,
-    ) -> Result<()> {
+    ) -> Result<(), WorkspaceError> {
+        let plugin = self
+            .config
+            .find_plugin(plugin_name)
+            .ok_or_else(|| WorkspaceError::not_found("plugin not found"))?;
+        if !plugin
+            .allow
+            .iter()
+            .any(|candidate| candidate == user_identity.as_str())
+        {
+            return Err(WorkspaceError::forbidden("plugin execution denied"));
+        }
         self.plugin_runner()
-            .run_manual_plugin(plugin_name, user_identity)
+            .run_plugin(plugin_name, user_identity)
             .await
+            .map_err(WorkspaceError::internal)
     }
 
     pub fn plugin_url_prefix(&self) -> &str {
@@ -131,7 +139,7 @@ impl WorkspaceService {
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
         self.enforce_not_ignored(&path)?;
-        self.enforce_policy(MethodKind::Get, &path)?;
+        self.enforce_policy(MethodKind::Get, &path, user_identity)?;
 
         if path.is_directory() {
             return self.directory_response(&path, user_identity).await;
@@ -152,8 +160,6 @@ impl WorkspaceService {
             }
         };
 
-        self.run_trigger(PluginTrigger::Get, &path, user_identity)
-            .await?;
         Ok(file_response(
             StatusCode::OK,
             &content_type_for_path(&path),
@@ -169,7 +175,7 @@ impl WorkspaceService {
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
         self.enforce_not_ignored(&path)?;
-        self.enforce_policy(MethodKind::Post, &path)?;
+        self.enforce_policy(MethodKind::Post, &path, user_identity)?;
 
         if path.is_directory() {
             match self.repository.create_directory(&path).await {
@@ -195,8 +201,6 @@ impl WorkspaceService {
             }
         }
 
-        self.run_trigger(PluginTrigger::Post, &path, user_identity)
-            .await?;
         Ok(StatusCode::CREATED.into_response())
     }
 
@@ -208,7 +212,7 @@ impl WorkspaceService {
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
         self.enforce_not_ignored(&path)?;
-        self.enforce_policy(MethodKind::Put, &path)?;
+        self.enforce_policy(MethodKind::Put, &path, user_identity)?;
         reject_directory_path(&path, "cannot update a directory path with PUT")?;
 
         match self.repository.write_text_file(&path, body).await {
@@ -220,8 +224,6 @@ impl WorkspaceService {
             }
         }
 
-        self.run_trigger(PluginTrigger::Put, &path, user_identity)
-            .await?;
         Ok(StatusCode::NO_CONTENT.into_response())
     }
 
@@ -232,7 +234,7 @@ impl WorkspaceService {
     ) -> Result<Response, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
         self.enforce_not_ignored(&path)?;
-        self.enforce_policy(MethodKind::Delete, &path)?;
+        self.enforce_policy(MethodKind::Delete, &path, user_identity)?;
 
         if path.is_directory() {
             match self.repository.delete_directory(&path).await {
@@ -258,8 +260,6 @@ impl WorkspaceService {
             }
         }
 
-        self.run_trigger(PluginTrigger::Delete, &path, user_identity)
-            .await?;
         Ok(StatusCode::NO_CONTENT.into_response())
     }
 
@@ -273,10 +273,14 @@ impl WorkspaceService {
             .map_err(WorkspaceError::internal)
     }
 
-    pub async fn get_path_info(&self, url_path: &str) -> Result<Json<PathInfo>, WorkspaceError> {
+    pub async fn get_path_info(
+        &self,
+        url_path: &str,
+        user_identity: &UserIdentity,
+    ) -> Result<Json<PathInfo>, WorkspaceError> {
         let path = self.normalize_request_path(url_path)?;
         self.enforce_not_ignored(&path)?;
-        self.enforce_policy(MethodKind::Get, &path)?;
+        self.enforce_policy(MethodKind::Get, &path, user_identity)?;
 
         let info = self.repository.path_info(&path).await.map_err(|error| {
             let mapped = self.map_metadata_error(error);
@@ -316,28 +320,7 @@ impl WorkspaceService {
             }
         };
         let entries = self.filter_ignored_entries(path, entries)?;
-        self.run_trigger(PluginTrigger::Get, path, user_identity)
-            .await?;
         Ok(text_response(StatusCode::OK, entries.join("\n")))
-    }
-
-    async fn run_trigger(
-        &self,
-        trigger: PluginTrigger,
-        path: &WorkspacePath,
-        user_identity: &UserIdentity,
-    ) -> Result<(), WorkspaceError> {
-        match self
-            .plugin_runner()
-            .run_hook_if_matched(trigger, path, user_identity)
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                tracing::warn!(user = %user_identity, path = %path, trigger = %trigger.as_str(), error = %error, "plugin hook failed");
-                Err(WorkspaceError::internal(error))
-            }
-        }
     }
 
     fn plugin_runner(&self) -> PluginRunner<'_> {
@@ -357,9 +340,10 @@ impl WorkspaceService {
         &self,
         method: MethodKind,
         path: &WorkspacePath,
+        user_identity: &UserIdentity,
     ) -> Result<(), WorkspaceError> {
         let allowed = self
-            .resolve_policy(method, path)
+            .resolve_policy(method, path, user_identity)
             .map_err(WorkspaceError::internal)?
             .unwrap_or(false);
 
@@ -407,8 +391,13 @@ impl WorkspaceService {
             .collect()
     }
 
-    fn resolve_policy(&self, method: MethodKind, path: &WorkspacePath) -> Result<Option<bool>> {
-        resolve_policy(method, &self.config.policy, path)
+    fn resolve_policy(
+        &self,
+        method: MethodKind,
+        path: &WorkspacePath,
+        user_identity: &UserIdentity,
+    ) -> Result<Option<bool>> {
+        resolve_policy(method, &self.config.policy, path, user_identity)
     }
 
     fn inspect_policy_rules(&self, path: &WorkspacePath) -> Result<PolicyInspection> {
@@ -567,7 +556,7 @@ mod tests {
     use camino::Utf8PathBuf;
 
     use super::*;
-    use crate::config::{IgnoreConfig, Policy, PolicyPermissions, ServeSettings, TaskConfig};
+    use crate::config::{IgnoreConfig, Policy, PolicyPermissions, ServeSettings};
     use crate::info::{PathInfo, PathInfoKind};
 
     fn test_config_with_ignore(paths: Vec<WorkspacePath>) -> RepositoryConfig {
@@ -577,15 +566,14 @@ mod tests {
             policy: vec![Policy {
                 path: WorkspacePath::from_path_str(".").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             }],
             ignore: IgnoreConfig { paths },
             plugin: Vec::new(),
-            task: Vec::<TaskConfig>::new(),
         }
     }
 
@@ -650,7 +638,7 @@ mod tests {
         ]));
         let repository = Arc::new(FsRepository::open(&root, &config).unwrap());
         let workspace = WorkspaceService::new(repository, config);
-        let user = UserIdentity::new("");
+        let user = UserIdentity::new("alice_browser");
 
         let response = workspace.get_root(&user).await.unwrap();
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();

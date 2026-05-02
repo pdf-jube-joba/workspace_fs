@@ -15,8 +15,6 @@ pub struct RepositoryConfig {
     pub ignore: IgnoreConfig,
     #[serde(default)]
     pub plugin: Vec<PluginConfig>,
-    #[serde(default)]
-    pub task: Vec<TaskConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +40,14 @@ impl Default for ServeSettings {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ServeSettingsOverride {
+    pub port: Option<u16>,
+    pub plugin_url_prefix: Option<String>,
+    pub policy_url_prefix: Option<String>,
+    pub info_url_prefix: Option<String>,
+}
+
 fn default_port() -> u16 {
     3000
 }
@@ -56,10 +62,6 @@ fn default_policy_url_prefix() -> String {
 
 fn default_info_url_prefix() -> String {
     "/.info".into()
-}
-
-fn default_policy_get() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,23 +80,23 @@ pub struct IgnoreConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PolicyPermissions {
-    #[serde(rename = "GET", default = "default_policy_get")]
-    pub get: bool,
+    #[serde(rename = "GET", default)]
+    pub get: Vec<String>,
     #[serde(rename = "POST", default)]
-    pub post: bool,
+    pub post: Vec<String>,
     #[serde(rename = "PUT", default)]
-    pub put: bool,
+    pub put: Vec<String>,
     #[serde(rename = "DELETE", default)]
-    pub delete: bool,
+    pub delete: Vec<String>,
 }
 
 impl PolicyPermissions {
     pub fn deny_all() -> Self {
         Self {
-            get: false,
-            post: false,
-            put: false,
-            delete: false,
+            get: Vec::new(),
+            post: Vec::new(),
+            put: Vec::new(),
+            delete: Vec::new(),
         }
     }
 }
@@ -105,21 +107,18 @@ pub struct PluginConfig {
     pub runner: String,
     #[serde(default)]
     pub command: Vec<String>,
-    pub trigger: String,
-    #[serde(default, deserialize_with = "deserialize_optional_workspace_path")]
-    pub path: Option<WorkspacePath>,
     #[serde(default)]
-    pub deps: Vec<String>,
+    pub allow: Vec<String>,
+    #[serde(default, rename = "trigger")]
+    pub(crate) _legacy_trigger: Option<String>,
+    #[serde(default, rename = "path")]
+    pub(crate) _legacy_path: Option<String>,
+    #[serde(default, rename = "deps")]
+    pub(crate) _legacy_deps: Vec<String>,
     // URL prefix なので、 `WorkspacePath` ではなく文字列で受け取る。検証は後で行う。
     pub mount: Option<String>,
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct TaskConfig {
-    pub name: String,
-    pub steps: Vec<String>,
 }
 
 impl RepositoryConfig {
@@ -127,7 +126,10 @@ impl RepositoryConfig {
         toml::from_str(text).context("failed to parse .repo/config.toml")
     }
 
-    pub fn load(repository_root: &Utf8Path) -> Result<Self> {
+    pub fn load_with_serve_overrides(
+        repository_root: &Utf8Path,
+        overrides: &ServeSettingsOverride,
+    ) -> Result<Self> {
         let config_path = repository_root.join(".repo").join("config.toml");
         if !config_path.is_file() {
             bail!("missing .repo/config.toml");
@@ -135,9 +137,25 @@ impl RepositoryConfig {
         let config_text = std::fs::read_to_string(config_path.as_std_path())
             .context("failed to read .repo/config.toml")?;
         let mut config = Self::load_toml(&config_text)?;
+        config.apply_serve_overrides(overrides);
         config.insert_implicit_mount_policies()?;
         config.validate(repository_root)?;
         Ok(config)
+    }
+
+    fn apply_serve_overrides(&mut self, overrides: &ServeSettingsOverride) {
+        if let Some(port) = overrides.port {
+            self.serve.port = port;
+        }
+        if let Some(plugin_url_prefix) = &overrides.plugin_url_prefix {
+            self.serve.plugin_url_prefix = plugin_url_prefix.clone();
+        }
+        if let Some(policy_url_prefix) = &overrides.policy_url_prefix {
+            self.serve.policy_url_prefix = policy_url_prefix.clone();
+        }
+        if let Some(info_url_prefix) = &overrides.info_url_prefix {
+            self.serve.info_url_prefix = info_url_prefix.clone();
+        }
     }
 
     fn insert_implicit_mount_policies(&mut self) -> Result<()> {
@@ -149,10 +167,10 @@ impl RepositoryConfig {
             implicit_policies.push(Policy {
                 path: WorkspacePath::from_path_str(mount.trim_start_matches('/'))?,
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: plugin.allow.clone(),
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             });
         }
@@ -241,42 +259,6 @@ impl RepositoryConfig {
             if plugin.runner == "default" && !plugin.command.is_empty() {
                 bail!("default plugin must not set command: {}", plugin.name);
             }
-            if let Some(path) = &plugin.path {
-                if contains_glob_metachar(path.as_str()) {
-                    bail!("plugin path must not use glob syntax");
-                }
-                if path.is_reserved() {
-                    bail!("plugin path must not target .repo/");
-                }
-                if path_uses_reserved_url_prefix(path, &reserved_url_prefix_paths) {
-                    bail!("plugin path must not target reserved url prefix");
-                }
-            }
-            for dependency in &plugin.deps {
-                if !is_valid_plugin_name(dependency) {
-                    bail!(
-                        "plugin dependency name must match [A-Za-z_][A-Za-z0-9_-]*: {}",
-                        dependency
-                    );
-                }
-                if dependency == &plugin.name {
-                    bail!("plugin must not depend on itself: {}", plugin.name);
-                }
-                if self.find_plugin(dependency).is_none() {
-                    bail!(
-                        "plugin dependency not found: {} -> {}",
-                        plugin.name,
-                        dependency
-                    );
-                }
-            }
-            if plugin.trigger == "manual" {
-                if plugin.path.is_some() {
-                    bail!("manual plugin must not set path");
-                }
-            } else if plugin.path.is_none() {
-                bail!("non-manual plugin must set path");
-            }
             if let Some(mount) = &plugin.mount {
                 if !mount.starts_with('/') || !mount.ends_with('/') {
                     bail!("plugin mount must start and end with /");
@@ -316,10 +298,6 @@ impl RepositoryConfig {
     pub fn find_plugin(&self, name: &str) -> Option<&PluginConfig> {
         self.plugin.iter().find(|plugin| plugin.name == name)
     }
-
-    pub fn find_task(&self, name: &str) -> Option<&TaskConfig> {
-        self.task.iter().find(|task| task.name == name)
-    }
 }
 
 fn deserialize_workspace_path<'de, D>(
@@ -343,18 +321,6 @@ where
         .into_iter()
         .map(|value| WorkspacePath::from_path_str(&value).map_err(serde::de::Error::custom))
         .collect()
-}
-
-fn deserialize_optional_workspace_path<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<WorkspacePath>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    value
-        .map(|raw| WorkspacePath::from_path_str(&raw).map_err(serde::de::Error::custom))
-        .transpose()
 }
 
 fn contains_glob_metachar(value: &str) -> bool {
@@ -406,7 +372,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn policy_rule_defaults_get_only() {
+    fn policy_rule_defaults_deny_all() {
         let rule: Policy = toml::from_str(
             r#"
 path = "docs/"
@@ -416,17 +382,17 @@ path = "docs/"
 
         assert_eq!(rule.path.as_str(), "docs");
         assert!(rule.path.is_directory());
-        assert!(rule.permissions.get);
-        assert!(!rule.permissions.post);
-        assert!(!rule.permissions.put);
-        assert!(!rule.permissions.delete);
+        assert!(rule.permissions.get.is_empty());
+        assert!(rule.permissions.post.is_empty());
+        assert!(rule.permissions.put.is_empty());
+        assert!(rule.permissions.delete.is_empty());
     }
 
     #[test]
     fn policy_rule_requires_path() {
         let error = toml::from_str::<Policy>(
             r#"
-GET = true
+GET = ["alice_browser"]
 "#,
         )
         .unwrap_err();
@@ -442,6 +408,50 @@ GET = true
         assert_eq!(settings.plugin_url_prefix, "/.plugin");
         assert_eq!(settings.policy_url_prefix, "/.policy");
         assert_eq!(settings.info_url_prefix, "/.info");
+    }
+
+    #[test]
+    fn load_with_serve_overrides_replaces_serve_settings() {
+        let root = std::env::temp_dir().join(format!(
+            "workspace-fs-config-override-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join(".repo")).unwrap();
+        std::fs::write(
+            root.join(".repo").join("config.toml"),
+            r#"
+name = "repo"
+
+[serve]
+port = 3030
+plugin_url_prefix = "/.plugin"
+policy_url_prefix = "/.policy"
+info_url_prefix = "/.info"
+"#,
+        )
+        .unwrap();
+
+        let config = RepositoryConfig::load_with_serve_overrides(
+            Utf8Path::from_path(root.as_path()).unwrap(),
+            &ServeSettingsOverride {
+                port: Some(4040),
+                plugin_url_prefix: Some("/.plugin2".into()),
+                policy_url_prefix: Some("/.policy2".into()),
+                info_url_prefix: Some("/.info2".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(config.serve.port, 4040);
+        assert_eq!(config.serve.plugin_url_prefix, "/.plugin2");
+        assert_eq!(config.serve.policy_url_prefix, "/.policy2");
+        assert_eq!(config.serve.info_url_prefix, "/.info2");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -481,7 +491,6 @@ paths = [
             policy: Vec::new(),
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -506,7 +515,6 @@ paths = [
             policy: Vec::new(),
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -529,7 +537,6 @@ paths = [
             policy: Vec::new(),
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -563,7 +570,7 @@ port = 3000
         let error = toml::from_str::<Policy>(
             r#"
 path = "/viewer/"
-GET = true
+GET = ["alice_browser"]
 "#,
         )
         .unwrap_err();
@@ -579,15 +586,14 @@ GET = true
             policy: vec![Policy {
                 path: WorkspacePath::from_path_str("viewer/**").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             }],
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -613,23 +619,23 @@ GET = true
                 name: "assets".into(),
                 runner: "command".into(),
                 command: vec!["echo".into()],
-                trigger: "manual".into(),
-                path: None,
-                deps: Vec::new(),
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: Some("/assets/".into()),
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
         config.insert_implicit_mount_policies().unwrap();
 
         assert_eq!(config.policy.len(), 2);
         assert_eq!(config.policy[0].path.as_str(), "assets");
-        assert!(config.policy[0].permissions.get);
-        assert!(!config.policy[0].permissions.post);
+        assert_eq!(config.policy[0].permissions.get, vec!["alice_browser"]);
+        assert!(config.policy[0].permissions.post.is_empty());
         assert_eq!(config.policy[1].path.as_str(), "assets");
-        assert!(!config.policy[1].permissions.get);
+        assert!(config.policy[1].permissions.get.is_empty());
     }
 
     #[test]
@@ -643,13 +649,13 @@ GET = true
                 name: "bad.name".into(),
                 runner: "command".into(),
                 command: vec!["echo".into()],
-                trigger: "manual".into(),
-                path: None,
-                deps: Vec::new(),
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -658,7 +664,7 @@ GET = true
     }
 
     #[test]
-    fn repository_config_rejects_missing_plugin_dependency() {
+    fn repository_config_accepts_plugin_without_dependencies() {
         let config = RepositoryConfig {
             name: "repo".into(),
             serve: ServeSettings::default(),
@@ -668,18 +674,16 @@ GET = true
                 name: "preview".into(),
                 runner: "command".into(),
                 command: vec!["echo".into()],
-                trigger: "manual".into(),
-                path: None,
-                deps: vec!["build-wasm".into()],
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
-        let error = config.validate(Utf8Path::new(".")).unwrap_err();
-
-        assert!(error.to_string().contains("plugin dependency not found"));
+        config.validate(Utf8Path::new(".")).unwrap();
     }
 
     #[test]
@@ -693,13 +697,13 @@ GET = true
                 name: "preview".into(),
                 runner: "default".into(),
                 command: Vec::new(),
-                trigger: "manual".into(),
-                path: None,
-                deps: Vec::new(),
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
         config.validate(Utf8Path::new(".")).unwrap();
@@ -716,13 +720,13 @@ GET = true
                 name: "preview".into(),
                 runner: "default".into(),
                 command: vec!["echo".into()],
-                trigger: "manual".into(),
-                path: None,
-                deps: Vec::new(),
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -744,6 +748,7 @@ name = "repo"
 name = "build-md-preview"
 runner = "command"
 command = ["node", "./plugins/md_preview/build.mjs"]
+allow = ["alice_browser"]
 trigger = "manual"
 
 [plugin.md_preview]
@@ -794,15 +799,14 @@ entrypoint = "default"
             policy: vec![Policy {
                 path: WorkspacePath::from_path_str(".info/cache.txt").unwrap(),
                 permissions: PolicyPermissions {
-                    get: true,
-                    post: false,
-                    put: false,
-                    delete: false,
+                    get: vec!["alice_browser".into()],
+                    post: Vec::new(),
+                    put: Vec::new(),
+                    delete: Vec::new(),
                 },
             }],
             ignore: IgnoreConfig::default(),
             plugin: Vec::new(),
-            task: Vec::new(),
         };
 
         let error = config.validate(Utf8Path::new(".")).unwrap_err();
@@ -815,7 +819,7 @@ entrypoint = "default"
     }
 
     #[test]
-    fn repository_config_requires_path_for_non_manual_plugin() {
+    fn repository_config_accepts_command_plugin_without_trigger_metadata() {
         let config = RepositoryConfig {
             name: "repo".into(),
             serve: ServeSettings::default(),
@@ -825,50 +829,36 @@ entrypoint = "default"
                 name: "preview".into(),
                 runner: "command".into(),
                 command: vec!["echo".into()],
-                trigger: "GET".into(),
-                path: None,
-                deps: Vec::new(),
+                allow: vec!["alice_browser".into()],
+                _legacy_trigger: None,
+                _legacy_path: None,
+                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
-            task: Vec::new(),
         };
 
-        let error = config.validate(Utf8Path::new(".")).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("non-manual plugin must set path")
-        );
+        config.validate(Utf8Path::new(".")).unwrap();
     }
 
     #[test]
-    fn repository_config_rejects_manual_plugin_path() {
-        let config = RepositoryConfig {
-            name: "repo".into(),
-            serve: ServeSettings::default(),
-            policy: Vec::new(),
-            ignore: IgnoreConfig::default(),
-            plugin: vec![PluginConfig {
-                name: "preview".into(),
-                runner: "command".into(),
-                command: vec!["echo".into()],
-                trigger: "manual".into(),
-                path: Some(WorkspacePath::from_path_str("docs/").unwrap()),
-                deps: Vec::new(),
-                mount: None,
-                extra: Default::default(),
-            }],
-            task: Vec::new(),
-        };
+    fn load_toml_ignores_legacy_trigger_metadata() {
+        let config = RepositoryConfig::load_toml(
+            r#"
+name = "repo"
 
-        let error = config.validate(Utf8Path::new(".")).unwrap_err();
+[[plugin]]
+name = "preview"
+runner = "command"
+command = ["echo"]
+allow = ["alice_browser"]
+trigger = "manual"
+deps = ["build-assets"]
+path = "docs/"
+"#,
+        )
+        .unwrap();
 
-        assert!(
-            error
-                .to_string()
-                .contains("manual plugin must not set path")
-        );
+        assert_eq!(config.plugin.len(), 1);
     }
 }

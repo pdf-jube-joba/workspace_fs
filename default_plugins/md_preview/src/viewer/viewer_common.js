@@ -1,4 +1,4 @@
-import {currentFileUrl, normalizePath, requestHeaders} from "./markdown_runtime.js";
+import {currentFileUrl, normalizePath} from "./markdown_runtime.js";
 
 export function splitPath(path) {
   const normalized = normalizePath(path).replace(/\/+$/, "");
@@ -94,7 +94,6 @@ export function applyTheme({view, navigation}) {
 export async function fetchOptionalText(path) {
   const response = await fetch(currentFileUrl(normalizePath(path)), {
     method: "GET",
-    headers: requestHeaders(),
   });
   if (response.status === 403 || response.status === 404) {
     return null;
@@ -110,7 +109,6 @@ export async function fetchOptionalText(path) {
 export async function fetchDirectoryEntries(directory) {
   const response = await fetch(directoryUrl(directory), {
     method: "GET",
-    headers: requestHeaders(),
   });
   if (!response.ok) {
     const error = new Error(`GET failed: ${response.status} ${response.statusText}`);

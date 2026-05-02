@@ -1,4 +1,4 @@
-import {currentFileUrl, fetchTextFile, normalizePath, requestHeaders} from "./markdown_runtime.js";
+import {currentFileUrl, fetchTextFile, normalizePath} from "./markdown_runtime.js";
 import {
   applyTheme,
   detectNavigationMode,
@@ -104,7 +104,6 @@ async function createEmptyMarkdownFile(path) {
   const response = await fetch(currentFileUrl(path), {
     method: "POST",
     headers: {
-      ...requestHeaders(),
       "Content-Type": "text/plain; charset=utf-8",
     },
     body: "",
@@ -119,7 +118,6 @@ async function createEmptyMarkdownFile(path) {
 async function fetchPathInfo(path) {
   const response = await fetch(infoPathUrl(path), {
     method: "GET",
-    headers: requestHeaders(),
   });
   if (!response.ok) {
     throw new Error(`GET failed: ${response.status} ${response.statusText}`);
@@ -130,7 +128,6 @@ async function fetchPathInfo(path) {
 async function fetchLinkIndex() {
   const response = await fetch(LINK_INDEX_URL, {
     method: "GET",
-    headers: requestHeaders(),
   });
   if (!response.ok) {
     throw new Error(`GET failed: ${response.status} ${response.statusText}`);
