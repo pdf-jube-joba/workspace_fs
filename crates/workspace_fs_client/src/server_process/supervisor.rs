@@ -47,6 +47,14 @@ impl ServerSupervisor {
             )
         })?;
         let upstream_base = format!("http://127.0.0.1:{port}");
+        if is_server_reachable(port).await {
+            tracing::info!(
+                repository = %repository.name,
+                upstream = %upstream_base,
+                "reusing existing spawned server"
+            );
+            return Ok(upstream_base);
+        }
         let child = self.spawn_server_process(server).await?;
         self.spawned.insert(
             repository.name.clone(),
@@ -163,4 +171,9 @@ fn is_connection_pending(error: &std::io::Error) -> bool {
             | std::io::ErrorKind::TimedOut
             | std::io::ErrorKind::NotConnected
     )
+}
+
+async fn is_server_reachable(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect(addr).await.is_ok()
 }

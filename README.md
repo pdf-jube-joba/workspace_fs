@@ -15,12 +15,6 @@ cargo run -- ./test-repository
 
 これは workspace root の default member である `workspace_fs_client` を起動し、`cwd` または指定 path の `.repo/user.toml` を読んで client を立てます。`mode = "spawn"` の repository は local server も起動します。
 
-対話モードで起動する場合は `--repl` を付けます。
-
-```bash
-cargo run -- ./test-repository --repl
-```
-
 server を直接起動する場合は次です。
 
 ```bash

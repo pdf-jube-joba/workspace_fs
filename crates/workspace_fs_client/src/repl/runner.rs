@@ -1,23 +1,39 @@
+use std::io::BufRead;
+
 use anyhow::{Result, anyhow, bail};
+use tokio::sync::{mpsc, watch};
 
 use crate::{
     config::user_config::UserConfig, runtime::app::ServerSupervisor, task_runner::task_runner,
 };
 
-pub(crate) async fn run_repl(config: &UserConfig, supervisor: &mut ServerSupervisor) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+pub(crate) async fn run_repl(
+    config: &UserConfig,
+    supervisor: &mut ServerSupervisor,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
 
-    let stdin = tokio::io::stdin();
-    let mut lines = BufReader::new(stdin).lines();
+    let mut lines = spawn_stdin_reader();
     let mut stdout = tokio::io::stdout();
 
     loop {
         stdout.write_all(b"> ").await?;
         stdout.flush().await?;
 
-        let Some(line) = lines.next_line().await? else {
+        let line = tokio::select! {
+            result = lines.recv() => result,
+            changed = shutdown_rx.changed() => {
+                if changed.is_ok() && *shutdown_rx.borrow() {
+                    tracing::info!("shutdown requested; closing REPL");
+                }
+                break;
+            }
+        };
+        let Some(line) = line else {
             break;
         };
+        let line = line?;
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -60,6 +76,25 @@ pub(crate) async fn run_repl(config: &UserConfig, supervisor: &mut ServerSupervi
     }
 
     Ok(())
+}
+
+fn spawn_stdin_reader() -> mpsc::UnboundedReceiver<Result<String>> {
+    let (tx, rx) = mpsc::unbounded_channel();
+
+    std::thread::Builder::new()
+        .name("workspace-fs-repl-stdin".into())
+        .spawn(move || {
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                let line = line.map_err(|error| anyhow::Error::from(error));
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        })
+        .expect("failed to spawn REPL stdin reader thread");
+
+    rx
 }
 
 enum ReplCommand {

@@ -10,7 +10,6 @@ use crate::{
     config::{cli::CliOptions, user_config::UserConfig},
     proxy::http_proxy,
     repl::runner,
-    task_runner::task_runner,
 };
 
 #[derive(Clone)]
@@ -43,27 +42,12 @@ pub async fn run(cli: CliOptions) -> Result<()> {
     let config = UserConfig::load(&repository_root)?;
     let workspace_root = workspace_fs_root();
     let mut supervisor = ServerSupervisor::new(workspace_root, repository_root.clone());
-
-    let task_name = cli.task.clone().or(cli.task_only.clone());
-    if let Some(task_name) = task_name.as_deref() {
-        task_runner::run_task(&config, task_name, &mut supervisor).await?;
-        if cli.task_only.is_some() {
-            supervisor.shutdown_all().await;
-            return Ok(());
-        }
-    }
-
-    if cli.repl {
-        runner::run_repl(&config, &mut supervisor).await?;
-        supervisor.shutdown_all().await;
-        return Ok(());
-    }
-
-    let repositories = config.repositories_to_start(cli.repository_name.as_deref())?;
+    let repositories = config.repositories_to_start(None)?;
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_for_signal = shutdown_tx.clone();
     tokio::spawn(async move {
         let _ = signal::ctrl_c().await;
+        tracing::info!("received Ctrl+C; starting graceful shutdown");
         let _ = shutdown_for_signal.send(true);
     });
 
@@ -94,20 +78,47 @@ pub async fn run(cli: CliOptions) -> Result<()> {
     }
 
     let mut first_error: Option<anyhow::Error> = None;
-    while let Some(result) = join_set.join_next().await {
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                if first_error.is_none() {
-                    first_error = Some(error);
+    {
+        let mut repl = std::pin::pin!(runner::run_repl(
+            &config,
+            &mut supervisor,
+            shutdown_rx.clone(),
+        ));
+        let mut repl_done = false;
+
+        loop {
+            tokio::select! {
+                repl_result = &mut repl, if !repl_done => {
+                    repl_done = true;
+                    if let Err(error) = repl_result {
+                        first_error.get_or_insert(error);
+                    }
+                    let _ = shutdown_tx.send(true);
                 }
-                let _ = shutdown_tx.send(true);
+                result = join_set.join_next(), if !join_set.is_empty() => {
+                    match result {
+                        Some(Ok(Ok(()))) => {}
+                        Some(Ok(Err(error))) => {
+                            if first_error.is_none() {
+                                first_error = Some(error);
+                            }
+                            let _ = shutdown_tx.send(true);
+                            break;
+                        }
+                        Some(Err(error)) => {
+                            if first_error.is_none() {
+                                first_error = Some(anyhow!("proxy server task failed: {error}"));
+                            }
+                            let _ = shutdown_tx.send(true);
+                            break;
+                        }
+                        None => {}
+                    }
+                }
             }
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(anyhow!("proxy server task failed: {error}"));
-                }
-                let _ = shutdown_tx.send(true);
+
+            if repl_done && join_set.is_empty() {
+                break;
             }
         }
     }

@@ -269,9 +269,6 @@ mod tests {
             runner: "command".into(),
             command: vec!["echo".into()],
             allow: vec!["user".into()],
-            _legacy_trigger: None,
-            _legacy_path: None,
-            _legacy_deps: Vec::new(),
             mount: Some("/plugin-assets/".into()),
             extra,
         }

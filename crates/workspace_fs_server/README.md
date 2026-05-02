@@ -136,7 +136,10 @@ allow = ["alice_browser"]
 mount = "/md/"
 
 [plugin.md_preview]
-enhance = []
+macro_path = "./macros.txt"
+
+[plugin.md_preview.md_viewer]
+additional_js = ["assets/header.js"]
 ```
 
 ## plugin 実行時の前提

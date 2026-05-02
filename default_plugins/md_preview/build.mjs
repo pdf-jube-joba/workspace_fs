@@ -1,5 +1,5 @@
 import {build} from "esbuild";
-import {cp, mkdir, writeFile} from "node:fs/promises";
+import {cp, mkdir, readFile, writeFile} from "node:fs/promises";
 import {existsSync} from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -26,11 +26,11 @@ const transforms = [
   },
   ...normalizeModuleHooks(pluginSettings.md_preview?.transform, "transform"),
 ];
-const enhancers = normalizeEnhancers(pluginSettings.md_preview?.enhance);
 const macrosSource = resolveMacrosSource(
-  pluginSettings.md_preview?.macro_path ?? pluginSettings.md_preview?.macros_path,
+  pluginSettings.md_preview?.macro_path,
   repositoryRoot,
 );
+const viewerSettings = normalizeViewerSettings(pluginSettings.md_preview);
 const macrosOutPath = path.join(outDir, "macros.txt");
 const katexTransformSrcPath = path.join(katexDir, "katex_transform.js");
 
@@ -43,7 +43,9 @@ await cp(path.join(katexDistDir, "fonts"), path.join(katexOutDir, "fonts"), {rec
 await cp(viewerSrcDir, outDir, {recursive: true});
 await cp(path.join(katexDir, "katex_pre.css"), path.join(outDir, "katex_pre.css"));
 await writeTransformRunner(path.join(outDir, "transform_runner.js"), transforms);
-await writeEnhanceRunner(path.join(outDir, "enhance_runner.js"), enhancers);
+await injectHeadAssets(path.join(outDir, "md_preview.html"), viewerSettings.md_viewer);
+await injectHeadAssets(path.join(outDir, "md_editor.html"), viewerSettings.md_editor);
+await injectHeadAssets(path.join(outDir, "directory_view.html"), viewerSettings.directory_view);
 await generateLinkIndex({outDir, repositoryRoot});
 
 await build({
@@ -167,8 +169,72 @@ function normalizeModuleHooks(rawHooks, kind) {
   return values;
 }
 
-function normalizeEnhancers(rawEnhancers) {
-  return normalizeModuleHooks(rawEnhancers, "enhance");
+function normalizeViewerSettings(mdPreviewSettings = {}) {
+  return {
+    md_viewer: normalizeHeadAssets(mdPreviewSettings.md_viewer ?? mdPreviewSettings["md-viewer"], "md_viewer"),
+    md_editor: normalizeHeadAssets(mdPreviewSettings.md_editor ?? mdPreviewSettings["md-editor"], "md_editor"),
+    directory_view: normalizeHeadAssets(
+      mdPreviewSettings.directory_view ?? mdPreviewSettings["directory-view"],
+      "directory_view",
+    ),
+  };
+}
+
+function normalizeHeadAssets(rawSettings, sectionName) {
+  if (rawSettings == null) {
+    return {
+      additional_js: [],
+      additional_module_js: [],
+      additional_css: [],
+    };
+  }
+  if (!rawSettings || typeof rawSettings !== "object" || Array.isArray(rawSettings)) {
+    throw new Error(`md_preview.${sectionName} must be a table`);
+  }
+  return {
+    additional_js: normalizePathList(
+      rawSettings.additional_js ?? rawSettings["additional-js"],
+      `${sectionName}.additional_js`,
+    ),
+    additional_module_js: normalizePathList(
+      rawSettings.additional_module_js ?? rawSettings["additional-module-js"],
+      `${sectionName}.additional_module_js`,
+    ),
+    additional_css: normalizePathList(
+      rawSettings.additional_css ?? rawSettings["additional-css"],
+      `${sectionName}.additional_css`,
+    ),
+  };
+}
+
+function normalizePathList(rawValue, fieldName) {
+  if (rawValue == null) {
+    return [];
+  }
+  if (!Array.isArray(rawValue)) {
+    throw new Error(`md_preview.${fieldName} must be an array`);
+  }
+  return rawValue.map((value, index) => normalizeRepositoryAssetPath(value, `${fieldName}[${index}]`));
+}
+
+function normalizeRepositoryAssetPath(value, fieldName) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`md_preview.${fieldName} must be a non-empty string`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith("/")) {
+    throw new Error(`md_preview.${fieldName} must be a repository-relative path`);
+  }
+  const normalized = path.posix.normalize(trimmed);
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../")
+  ) {
+    throw new Error(`md_preview.${fieldName} must stay within the repository root`);
+  }
+  return `/${normalized}`;
 }
 
 async function writeTransformRunner(outputPath, transforms) {
@@ -198,28 +264,34 @@ ${sharedHookLoaderSource()}
   await writeFile(outputPath, source);
 }
 
-async function writeEnhanceRunner(outputPath, enhancers) {
-  const source = `const enhancerSpecs = ${JSON.stringify(enhancers, null, 2)};
-
-let loadedEnhancersPromise = null;
-
-export async function runEnhancers(root, context = {}) {
-  const loadedEnhancers = await loadEnhancers();
-  for (const enhance of loadedEnhancers) {
-    await enhance(root, context);
+async function injectHeadAssets(htmlPath, assets) {
+  if (
+    assets.additional_js.length === 0 &&
+    assets.additional_module_js.length === 0 &&
+    assets.additional_css.length === 0
+  ) {
+    return;
   }
-}
 
-async function loadEnhancers() {
-  if (!loadedEnhancersPromise) {
-    loadedEnhancersPromise = Promise.all(enhancerSpecs.map(spec => loadHook(spec, "enhancer")));
+  const html = await readFile(htmlPath, "utf8");
+  const headClose = html.indexOf("</head>");
+  if (headClose === -1) {
+    throw new Error(`viewer HTML is missing </head>: ${htmlPath}`);
   }
-  return loadedEnhancersPromise;
-}
 
-${sharedHookLoaderSource()}
-`;
-  await writeFile(outputPath, source);
+  const additions = [];
+  for (const href of assets.additional_css) {
+    additions.push(`  <link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`);
+  }
+  for (const src of assets.additional_js) {
+    additions.push(`  <script src="${escapeHtmlAttribute(src)}"></script>`);
+  }
+  for (const src of assets.additional_module_js) {
+    additions.push(`  <script type="module" src="${escapeHtmlAttribute(src)}"></script>`);
+  }
+
+  const patched = `${html.slice(0, headClose)}${additions.join("\n")}\n${html.slice(headClose)}`;
+  await writeFile(htmlPath, patched);
 }
 
 function sharedHookLoaderSource() {
@@ -250,4 +322,10 @@ function baseUrlFromModuleUrl(value) {
   url.hash = "";
   return url.href;
 }`;
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;");
 }

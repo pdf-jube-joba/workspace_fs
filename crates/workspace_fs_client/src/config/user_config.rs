@@ -39,7 +39,7 @@ pub struct UserRepositoryConfig {
     pub as_user: String,
     #[serde(default = "default_plugin_url_prefix")]
     pub plugin_url_prefix: String,
-    #[serde(default, alias = "serve")]
+    #[serde(default)]
     pub server: Option<UserServerConfig>,
 }
 

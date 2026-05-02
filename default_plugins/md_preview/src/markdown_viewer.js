@@ -8,7 +8,10 @@ export async function renderMarkdownToElement({text, element, basePath = "", mac
   const html = await renderMarkdownToHtml({text, basePath, macros});
   element.innerHTML = html;
   element.classList.add("md-view");
-  await runConfiguredEnhancers(element, {basePath});
+  element.dispatchEvent(new CustomEvent("md-preview:render", {
+    bubbles: true,
+    detail: {basePath},
+  }));
   return element;
 }
 
@@ -27,8 +30,6 @@ export async function renderMarkdownToHtml({text, basePath = "", macros = {}}) {
 export function from_text(text) {
   return fromText(text);
 }
-
-let enhanceRunnerPromise = null;
 let transformRunnerPromise = null;
 
 async function runConfiguredTransforms(text, context) {
@@ -38,13 +39,4 @@ async function runConfiguredTransforms(text, context) {
   }
   const {runTransforms} = await transformRunnerPromise;
   return runTransforms(text, context);
-}
-
-async function runConfiguredEnhancers(root, context) {
-  if (!enhanceRunnerPromise) {
-    const enhanceRunnerUrl = new URL("./enhance_runner.js", import.meta.url);
-    enhanceRunnerPromise = import(enhanceRunnerUrl.href);
-  }
-  const {runEnhancers} = await enhanceRunnerPromise;
-  await runEnhancers(root, context);
 }

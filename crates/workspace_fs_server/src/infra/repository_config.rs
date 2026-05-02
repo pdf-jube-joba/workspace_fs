@@ -109,12 +109,6 @@ pub(crate) struct PluginConfig {
     pub command: Vec<String>,
     #[serde(default)]
     pub allow: Vec<String>,
-    #[serde(default, rename = "trigger")]
-    pub(crate) _legacy_trigger: Option<String>,
-    #[serde(default, rename = "path")]
-    pub(crate) _legacy_path: Option<String>,
-    #[serde(default, rename = "deps")]
-    pub(crate) _legacy_deps: Vec<String>,
     // URL prefix なので、 `WorkspacePath` ではなく文字列で受け取る。検証は後で行う。
     pub mount: Option<String>,
     #[serde(flatten)]
@@ -620,9 +614,6 @@ GET = ["alice_browser"]
                 runner: "command".into(),
                 command: vec!["echo".into()],
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: Some("/assets/".into()),
                 extra: Default::default(),
             }],
@@ -650,9 +641,6 @@ GET = ["alice_browser"]
                 runner: "command".into(),
                 command: vec!["echo".into()],
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
@@ -675,9 +663,6 @@ GET = ["alice_browser"]
                 runner: "command".into(),
                 command: vec!["echo".into()],
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
@@ -698,9 +683,6 @@ GET = ["alice_browser"]
                 runner: "default".into(),
                 command: Vec::new(),
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
@@ -721,9 +703,6 @@ GET = ["alice_browser"]
                 runner: "default".into(),
                 command: vec!["echo".into()],
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
@@ -749,7 +728,6 @@ name = "build-md-preview"
 runner = "command"
 command = ["node", "./plugins/md_preview/build.mjs"]
 allow = ["alice_browser"]
-trigger = "manual"
 
 [plugin.md_preview]
 enabled = true
@@ -759,10 +737,8 @@ name = "katex"
 url = "{MOUNT_MD_PREVIEW}katex_transform.js"
 entrypoint = "default"
 
-[[plugin.md_preview.enhance]]
-name = "embedded-models"
-url = "{MOUNT_BUILD_WASM}enhance.js"
-entrypoint = "default"
+[plugin.md_preview.md_viewer]
+additional_js = ["assets/header.js"]
 "#,
         )
         .unwrap();
@@ -779,15 +755,18 @@ entrypoint = "default"
             Some("default")
         );
 
-        let enhancers = md_preview.get("enhance").unwrap().as_array().unwrap();
-        let enhancer = enhancers[0].as_table().unwrap();
         assert_eq!(
-            enhancer.get("name").unwrap().as_str(),
-            Some("embedded-models")
-        );
-        assert_eq!(
-            enhancer.get("entrypoint").unwrap().as_str(),
-            Some("default")
+            md_preview
+                .get("md_viewer")
+                .unwrap()
+                .as_table()
+                .unwrap()
+                .get("additional_js")
+                .unwrap()
+                .as_array()
+                .unwrap()[0]
+                .as_str(),
+            Some("assets/header.js")
         );
     }
 
@@ -819,7 +798,7 @@ entrypoint = "default"
     }
 
     #[test]
-    fn repository_config_accepts_command_plugin_without_trigger_metadata() {
+    fn repository_config_accepts_command_plugin_without_extra_metadata() {
         let config = RepositoryConfig {
             name: "repo".into(),
             serve: ServeSettings::default(),
@@ -830,35 +809,11 @@ entrypoint = "default"
                 runner: "command".into(),
                 command: vec!["echo".into()],
                 allow: vec!["alice_browser".into()],
-                _legacy_trigger: None,
-                _legacy_path: None,
-                _legacy_deps: Vec::new(),
                 mount: None,
                 extra: Default::default(),
             }],
         };
 
         config.validate(Utf8Path::new(".")).unwrap();
-    }
-
-    #[test]
-    fn load_toml_ignores_legacy_trigger_metadata() {
-        let config = RepositoryConfig::load_toml(
-            r#"
-name = "repo"
-
-[[plugin]]
-name = "preview"
-runner = "command"
-command = ["echo"]
-allow = ["alice_browser"]
-trigger = "manual"
-deps = ["build-assets"]
-path = "docs/"
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.plugin.len(), 1);
     }
 }

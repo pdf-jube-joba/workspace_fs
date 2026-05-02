@@ -26,8 +26,8 @@ Mount the plugin output at any prefix.
 Open the generated viewer files from that mount.
 
 For `workspace_fs` plugins, pass `{OUTPUT_DIRECTORY}` to `--out-dir`.
-Configure optional transforms and enhancers under `[plugin.md_preview]`.
-Each transform or enhancer entry must specify `url` and `entrypoint`.
+Configure optional transforms under `[plugin.md_preview]`.
+Configure viewer-specific head assets under `[plugin.md_preview.<viewer>]`.
 
 ## Markdown Preview
 
@@ -112,4 +112,12 @@ Direct requests to ignored paths are rejected by `workspace_fs`.
 ## Generated Settings
 
 When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[[plugin.md_preview.transform]]`, `build.mjs` appends those transforms after the default KaTeX transform.
-When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[plugin.md_preview]`, `build.mjs` generates `enhance_runner.js` from `[[plugin.md_preview.enhance]]`.
+When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[plugin.md_preview.md_viewer]`, `[plugin.md_preview.md_editor]`, or `[plugin.md_preview.directory_view]`, `build.mjs` injects the configured assets into that viewer's `<head>`.
+
+Each viewer table can contain:
+
+- `additional_js = ["assets/header.js"]`
+- `additional_module_js = ["assets/module.js"]`
+- `additional_css = ["assets/header.css"]`
+
+These paths are repository-relative and become root-relative URLs in the generated HTML.
