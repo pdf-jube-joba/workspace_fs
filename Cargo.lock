@@ -1212,15 +1212,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "workspace_fs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "tokio",
- "workspace_fs_client",
-]
-
-[[package]]
 name = "workspace_fs_client"
 version = "0.1.0"
 dependencies = [

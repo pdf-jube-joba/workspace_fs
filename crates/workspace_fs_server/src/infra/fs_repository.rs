@@ -4,14 +4,35 @@ use camino::{Utf8Path, Utf8PathBuf};
 use tokio::fs;
 
 use crate::{
-    config::RepositoryConfig,
-    info::{PathInfo, PathInfoKind},
-    path::WorkspacePath,
+    domain::{
+        path_info::{PathInfo, PathInfoKind},
+        workspace_path::WorkspacePath,
+    },
+    infra::repository_config::RepositoryConfig,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RepositoryError {
+    ReservedPath,
+    ResolvedPathEscapesRepositoryRoot,
+    SymlinkPathNotAllowed,
+    ParentDirectoryNotFound,
+    ParentPathNotDirectory,
+    NotDirectory,
+    DirectoryAlreadyExists,
+    DirectoryNotFound,
+    FileAlreadyExists,
+    FileNotFound,
+    PathIsDirectory,
+    PathIsNotDirectory,
+    DirectoryNotEmpty,
+    NonUtf8Path,
+    InvalidDirectoryEntry,
+}
 
 // .repo 以外を書き換えるインターフェースの提供
 #[async_trait]
-pub trait Repository: Send + Sync {
+pub(crate) trait Repository: Send + Sync {
     async fn list_directory(&self, path: &WorkspacePath) -> Result<Vec<String>>;
     async fn path_info(&self, path: &WorkspacePath) -> Result<PathInfo>;
     async fn create_directory(&self, path: &WorkspacePath) -> Result<()>;
@@ -22,7 +43,7 @@ pub trait Repository: Send + Sync {
     async fn delete_file(&self, path: &WorkspacePath) -> Result<()>;
 }
 
-pub struct FsRepository {
+pub(crate) struct FsRepository {
     repository_root: Utf8PathBuf,
     mounts: Vec<MountedDirectory>,
     reserved_paths: Vec<WorkspacePath>,
@@ -101,14 +122,17 @@ impl FsRepository {
 
     fn ensure_parent_directory_exists(&self, path: &Utf8Path) -> Result<()> {
         let Some(parent) = path.parent() else {
-            bail!("parent directory not found");
+            return Err(RepositoryError::ParentDirectoryNotFound.into());
         };
 
         self.ensure_no_symlink_components(parent, false)?;
+        if !parent.exists() {
+            return Err(RepositoryError::ParentDirectoryNotFound.into());
+        }
         let metadata = std::fs::symlink_metadata(parent.as_std_path())
             .context("failed to inspect parent directory")?;
         if !metadata.is_dir() {
-            bail!("parent path is not a directory");
+            return Err(RepositoryError::ParentPathNotDirectory.into());
         }
 
         Ok(())
@@ -133,7 +157,7 @@ impl FsRepository {
             .iter()
             .any(|reserved_path| requested_path.starts_with(reserved_path))
         {
-            bail!("reserved path");
+            return Err(RepositoryError::ReservedPath.into());
         }
         Ok(())
     }
@@ -145,13 +169,13 @@ impl FsRepository {
     ) -> Result<()> {
         let relative = path
             .strip_prefix(&self.repository_root)
-            .map_err(|_| anyhow!("resolved path escapes repository root"))?;
+            .map_err(|_| RepositoryError::ResolvedPathEscapesRepositoryRoot)?;
         let mut current = self.repository_root.clone();
 
         if let Ok(metadata) = std::fs::symlink_metadata(current.as_std_path())
             && metadata.file_type().is_symlink()
         {
-            bail!("symlink path is not allowed");
+            return Err(RepositoryError::SymlinkPathNotAllowed.into());
         }
 
         for component in relative.components() {
@@ -159,7 +183,7 @@ impl FsRepository {
             match std::fs::symlink_metadata(current.as_std_path()) {
                 Ok(metadata) => {
                     if metadata.file_type().is_symlink() {
-                        bail!("symlink path is not allowed");
+                        return Err(RepositoryError::SymlinkPathNotAllowed.into());
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -182,16 +206,17 @@ impl FsRepository {
         for dir_entry in std::fs::read_dir(directory.as_std_path())? {
             let dir_entry = dir_entry?;
             let path = dir_entry.path();
-            let utf8 = Utf8PathBuf::from_path_buf(path).map_err(|_| anyhow!("non-UTF-8 path"))?;
+            let utf8 =
+                Utf8PathBuf::from_path_buf(path).map_err(|_| RepositoryError::NonUtf8Path)?;
             let metadata = std::fs::symlink_metadata(utf8.as_std_path())
                 .context("failed to inspect directory entry")?;
             if metadata.file_type().is_symlink() {
-                bail!("symlink path is not allowed");
+                return Err(RepositoryError::SymlinkPathNotAllowed.into());
             }
 
             let mut entry = utf8
                 .file_name()
-                .ok_or_else(|| anyhow!("invalid directory entry"))?
+                .ok_or(RepositoryError::InvalidDirectoryEntry)?
                 .to_owned();
 
             if metadata.is_dir() {
@@ -211,8 +236,11 @@ impl Repository for FsRepository {
     async fn list_directory(&self, path: &WorkspacePath) -> Result<Vec<String>> {
         let directory = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&directory, false)?;
+        if !directory.exists() {
+            return Err(RepositoryError::DirectoryNotFound.into());
+        }
         if !directory.is_dir() {
-            bail!("not a directory");
+            return Err(RepositoryError::NotDirectory.into());
         }
 
         self.read_directory_entries(&directory)
@@ -221,6 +249,9 @@ impl Repository for FsRepository {
     async fn path_info(&self, path: &WorkspacePath) -> Result<PathInfo> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
+        if !resolved.exists() {
+            return Err(RepositoryError::FileNotFound.into());
+        }
         let metadata = fs::metadata(resolved.as_std_path())
             .await
             .context("failed to read metadata")?;
@@ -248,7 +279,7 @@ impl Repository for FsRepository {
         self.ensure_no_symlink_components(&resolved, true)?;
 
         if resolved.exists() {
-            bail!("directory already exists");
+            return Err(RepositoryError::DirectoryAlreadyExists.into());
         }
 
         self.ensure_parent_directory_exists(&resolved)?;
@@ -264,15 +295,15 @@ impl Repository for FsRepository {
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            bail!("directory not found");
+            return Err(RepositoryError::DirectoryNotFound.into());
         }
 
         if !resolved.is_dir() {
-            bail!("path is not a directory");
+            return Err(RepositoryError::PathIsNotDirectory.into());
         }
 
         if std::fs::read_dir(resolved.as_std_path())?.next().is_some() {
-            bail!("directory is not empty");
+            return Err(RepositoryError::DirectoryNotEmpty.into());
         }
 
         fs::remove_dir(resolved.as_std_path())
@@ -284,6 +315,12 @@ impl Repository for FsRepository {
     async fn read_file(&self, path: &WorkspacePath) -> Result<Vec<u8>> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
+        if !resolved.exists() {
+            return Err(RepositoryError::FileNotFound.into());
+        }
+        if resolved.is_dir() {
+            return Err(RepositoryError::PathIsDirectory.into());
+        }
         fs::read(resolved.as_std_path())
             .await
             .context("failed to read file")
@@ -294,7 +331,7 @@ impl Repository for FsRepository {
         self.ensure_no_symlink_components(&resolved, true)?;
 
         if resolved.exists() {
-            bail!("file already exists");
+            return Err(RepositoryError::FileAlreadyExists.into());
         }
 
         self.ensure_parent_directory_exists(&resolved)?;
@@ -310,11 +347,11 @@ impl Repository for FsRepository {
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            bail!("file not found");
+            return Err(RepositoryError::FileNotFound.into());
         }
 
         if resolved.is_dir() {
-            bail!("path is a directory");
+            return Err(RepositoryError::PathIsDirectory.into());
         }
 
         fs::write(resolved.as_std_path(), content)
@@ -328,11 +365,11 @@ impl Repository for FsRepository {
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            bail!("file not found");
+            return Err(RepositoryError::FileNotFound.into());
         }
 
         if resolved.is_dir() {
-            bail!("path is a directory");
+            return Err(RepositoryError::PathIsDirectory.into());
         }
 
         fs::remove_file(resolved.as_std_path())
@@ -342,10 +379,35 @@ impl Repository for FsRepository {
     }
 }
 
+impl std::fmt::Display for RepositoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::ReservedPath => "reserved path",
+            Self::ResolvedPathEscapesRepositoryRoot => "resolved path escapes repository root",
+            Self::SymlinkPathNotAllowed => "symlink path is not allowed",
+            Self::ParentDirectoryNotFound => "parent directory not found",
+            Self::ParentPathNotDirectory => "parent path is not a directory",
+            Self::NotDirectory => "not a directory",
+            Self::DirectoryAlreadyExists => "directory already exists",
+            Self::DirectoryNotFound => "directory not found",
+            Self::FileAlreadyExists => "file already exists",
+            Self::FileNotFound => "file not found",
+            Self::PathIsDirectory => "path is a directory",
+            Self::PathIsNotDirectory => "path is not a directory",
+            Self::DirectoryNotEmpty => "directory is not empty",
+            Self::NonUtf8Path => "non-UTF-8 path",
+            Self::InvalidDirectoryEntry => "invalid directory entry",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for RepositoryError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{IgnoreConfig, ServeSettings};
+    use crate::infra::repository_config::{IgnoreConfig, ServeSettings};
 
     fn test_config() -> RepositoryConfig {
         RepositoryConfig {

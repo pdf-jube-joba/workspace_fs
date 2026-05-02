@@ -2,13 +2,13 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::{
-    config::{Policy, PolicyPermissions},
-    identity::UserIdentity,
-    path::WorkspacePath,
+    domain::workspace_path::WorkspacePath,
+    http::identity::UserIdentity,
+    infra::repository_config::{Policy, PolicyPermissions},
 };
 
 #[derive(Debug, Clone, Copy)]
-pub enum MethodKind {
+pub(crate) enum MethodKind {
     Get,
     Post,
     Put,
@@ -16,7 +16,7 @@ pub enum MethodKind {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PolicyMatchInfo {
+pub(crate) struct PolicyMatchInfo {
     pub index: usize,
     pub path: WorkspacePath,
     pub depth: usize,
@@ -24,21 +24,21 @@ pub struct PolicyMatchInfo {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct SelectedPolicyInfo {
+pub(crate) struct SelectedPolicyInfo {
     pub index: usize,
     pub path: WorkspacePath,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PolicyInspection {
+pub(crate) struct PolicyInspection {
     pub path: WorkspacePath,
     pub matches: Vec<PolicyMatchInfo>,
     pub selected: Option<SelectedPolicyInfo>,
     pub effective: PolicyPermissions,
 }
 
-pub fn resolve_policy(
+pub(crate) fn resolve_policy(
     method: MethodKind,
     rules: &[Policy],
     path: &WorkspacePath,
@@ -63,7 +63,10 @@ pub fn resolve_policy(
     ))
 }
 
-pub fn inspect_policy_rules(rules: &[Policy], path: &WorkspacePath) -> Result<PolicyInspection> {
+pub(crate) fn inspect_policy_rules(
+    rules: &[Policy],
+    path: &WorkspacePath,
+) -> Result<PolicyInspection> {
     let mut matches = Vec::new();
     let mut selected: Option<(PolicyMatchInfo, String)> = None;
     for (index, rule) in rules.iter().enumerate() {
@@ -130,7 +133,7 @@ fn policy_matches(rule_path: &WorkspacePath, requested_path: &WorkspacePath) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Policy;
+    use crate::infra::repository_config::Policy;
 
     fn workspace_path(path: &str) -> WorkspacePath {
         WorkspacePath::from_url(path).unwrap()

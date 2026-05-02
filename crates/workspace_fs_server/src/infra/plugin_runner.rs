@@ -7,12 +7,12 @@ use serde_json::Value as JsonValue;
 use tokio::process::Command;
 
 use crate::{
-    config::{PluginConfig, RepositoryConfig},
-    identity::UserIdentity,
+    http::identity::UserIdentity,
+    infra::repository_config::{PluginConfig, RepositoryConfig},
 };
 
 #[derive(Debug, Clone)]
-pub struct PluginContext {
+pub(crate) struct PluginContext {
     pub repository_root: Utf8PathBuf,
     pub repository_name: String,
     pub plugin_name: String,
@@ -22,14 +22,14 @@ pub struct PluginContext {
     pub user_identity: UserIdentity,
 }
 
-pub struct PluginRunner<'a> {
+pub(crate) struct PluginRunner<'a> {
     repository_root: &'a camino::Utf8Path,
     repository_name: &'a str,
     config: &'a RepositoryConfig,
 }
 
 impl<'a> PluginRunner<'a> {
-    pub fn new(
+    pub(crate) fn new(
         repository_root: &'a camino::Utf8Path,
         repository_name: &'a str,
         config: &'a RepositoryConfig,
@@ -41,7 +41,11 @@ impl<'a> PluginRunner<'a> {
         }
     }
 
-    pub async fn run_plugin(&self, plugin_name: &str, user_identity: &UserIdentity) -> Result<()> {
+    pub(crate) async fn run_plugin(
+        &self,
+        plugin_name: &str,
+        user_identity: &UserIdentity,
+    ) -> Result<()> {
         let plugin = self
             .config
             .find_plugin(plugin_name)

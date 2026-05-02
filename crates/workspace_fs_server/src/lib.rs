@@ -1,9 +1,4 @@
-mod config;
-mod identity;
-mod info;
-mod path;
-mod plugin;
-mod policy;
-mod repository;
-pub mod server_app;
-mod workspace;
+pub mod application;
+pub mod domain;
+pub mod http;
+pub mod infra;

@@ -1,8 +1,18 @@
 use std::path::{Component, Path};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PathError {
+    UrlPathMustStartWithSlash,
+    PathRequired,
+    AbsolutePathNotAllowed,
+    PathEscapesRepositoryRoot,
+    ReservedPath,
+    PathMustBeUtf8,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspacePath {
@@ -19,16 +29,16 @@ impl WorkspacePath {
         let is_directory = path.trim_end().ends_with('/');
         let normalized_input = path
             .strip_prefix('/')
-            .ok_or_else(|| anyhow!("URL path must start with /"))?
+            .ok_or(PathError::UrlPathMustStartWithSlash)?
             .trim()
             .trim_end_matches('/');
         if normalized_input.is_empty() {
-            bail!("path is required");
+            return Err(PathError::PathRequired.into());
         }
 
         let path = Self::from_path_str(normalized_input)?;
         if path.is_reserved() {
-            bail!("reserved path");
+            return Err(PathError::ReservedPath.into());
         }
 
         Ok(Self {
@@ -47,19 +57,19 @@ impl WorkspacePath {
 
         let path = Path::new(normalized_input);
         if path.is_absolute() {
-            bail!("absolute paths are not allowed");
+            return Err(PathError::AbsolutePathNotAllowed.into());
         }
 
         let mut normalized = Utf8PathBuf::new();
         for component in path.components() {
             match component {
                 Component::Normal(part) => {
-                    let part = part.to_str().ok_or_else(|| anyhow!("path must be UTF-8"))?;
+                    let part = part.to_str().ok_or(PathError::PathMustBeUtf8)?;
                     normalized.push(part);
                 }
                 Component::CurDir => {}
                 Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    bail!("path escapes repository root");
+                    return Err(PathError::PathEscapesRepositoryRoot.into());
                 }
             }
         }
@@ -116,6 +126,22 @@ impl std::fmt::Display for WorkspacePath {
         f.write_str(self.as_str())
     }
 }
+
+impl std::fmt::Display for PathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::UrlPathMustStartWithSlash => "URL path must start with /",
+            Self::PathRequired => "path is required",
+            Self::AbsolutePathNotAllowed => "absolute paths are not allowed",
+            Self::PathEscapesRepositoryRoot => "path escapes repository root",
+            Self::ReservedPath => "reserved path",
+            Self::PathMustBeUtf8 => "path must be UTF-8",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for PathError {}
 
 impl Serialize for WorkspacePath {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

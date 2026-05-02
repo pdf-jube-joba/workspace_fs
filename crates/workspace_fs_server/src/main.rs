@@ -1,4 +1,4 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    workspace_fs_server::server_app::run_from_env().await
+    workspace_fs_server::http::server::run_from_env().await
 }

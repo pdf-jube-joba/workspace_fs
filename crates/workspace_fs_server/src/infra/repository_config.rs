@@ -2,10 +2,10 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8Path;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::path::WorkspacePath;
+use crate::domain::workspace_path::WorkspacePath;
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct RepositoryConfig {
+pub(crate) struct RepositoryConfig {
     pub name: String,
     #[serde(default)]
     pub serve: ServeSettings,
@@ -18,7 +18,7 @@ pub struct RepositoryConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ServeSettings {
+pub(crate) struct ServeSettings {
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_plugin_url_prefix")]
@@ -41,7 +41,7 @@ impl Default for ServeSettings {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ServeSettingsOverride {
+pub(crate) struct ServeSettingsOverride {
     pub port: Option<u16>,
     pub plugin_url_prefix: Option<String>,
     pub policy_url_prefix: Option<String>,
@@ -65,7 +65,7 @@ fn default_info_url_prefix() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Policy {
+pub(crate) struct Policy {
     #[serde(deserialize_with = "deserialize_workspace_path")]
     pub path: WorkspacePath,
     #[serde(flatten)]
@@ -73,13 +73,13 @@ pub struct Policy {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct IgnoreConfig {
+pub(crate) struct IgnoreConfig {
     #[serde(default, deserialize_with = "deserialize_workspace_paths")]
     pub paths: Vec<WorkspacePath>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PolicyPermissions {
+pub(crate) struct PolicyPermissions {
     #[serde(rename = "GET", default)]
     pub get: Vec<String>,
     #[serde(rename = "POST", default)]
@@ -102,7 +102,7 @@ impl PolicyPermissions {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PluginConfig {
+pub(crate) struct PluginConfig {
     pub name: String,
     pub runner: String,
     #[serde(default)]

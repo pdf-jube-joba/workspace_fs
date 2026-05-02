@@ -1,8 +1,9 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8Path;
 use serde::Deserialize;
+use toml::Value;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserConfig {
@@ -20,29 +21,11 @@ pub enum RepositoryMode {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UserServeConfig {
-    #[serde(default = "default_server_port")]
-    pub port: u16,
-    #[serde(default = "default_plugin_url_prefix")]
-    pub plugin_url_prefix: String,
-    #[serde(default = "default_policy_url_prefix")]
-    pub policy_url_prefix: String,
-    #[serde(default = "default_info_url_prefix")]
-    pub info_url_prefix: String,
+pub struct UserServerConfig {
     #[serde(default)]
     pub args: Vec<String>,
-}
-
-impl Default for UserServeConfig {
-    fn default() -> Self {
-        Self {
-            port: default_server_port(),
-            plugin_url_prefix: default_plugin_url_prefix(),
-            policy_url_prefix: default_policy_url_prefix(),
-            info_url_prefix: default_info_url_prefix(),
-            args: Vec::new(),
-        }
-    }
+    #[serde(flatten)]
+    pub values: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,8 +39,8 @@ pub struct UserRepositoryConfig {
     pub as_user: String,
     #[serde(default = "default_plugin_url_prefix")]
     pub plugin_url_prefix: String,
-    #[serde(default)]
-    pub serve: Option<UserServeConfig>,
+    #[serde(default, alias = "serve")]
+    pub server: Option<UserServerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,18 +140,26 @@ impl UserConfig {
                             repository.name
                         );
                     }
-                    let spawn_config = repository.effective_serve_config();
-                    if spawn_config.port == 0 {
+                    let server = repository.server.as_ref().ok_or_else(|| {
+                        anyhow!(
+                            "repository.server is required when mode = \"spawn\": {}",
+                            repository.name
+                        )
+                    })?;
+                    let port = server.port().ok_or_else(|| {
+                        anyhow!(
+                            "repository.server.port is required when mode = \"spawn\": {}",
+                            repository.name
+                        )
+                    })?;
+                    if port == 0 {
                         bail!(
-                            "repository.serve.port must not be zero: {}",
+                            "repository.server.port must not be zero: {}",
                             repository.name
                         );
                     }
-                    if !seen_spawn_ports.insert(spawn_config.port) {
-                        bail!(
-                            "duplicate spawned server port in .repo/user.toml: {}",
-                            spawn_config.port
-                        );
+                    if !seen_spawn_ports.insert(port) {
+                        bail!("duplicate spawned server port in .repo/user.toml: {}", port);
                     }
                 }
                 RepositoryMode::Attach => {
@@ -181,9 +172,9 @@ impl UserConfig {
                     if where_.trim().is_empty() {
                         bail!("repository.where must not be empty");
                     }
-                    if repository.serve.is_some() {
+                    if repository.server.is_some() {
                         bail!(
-                            "repository.serve is only valid when mode = \"spawn\": {}",
+                            "repository.server is only valid when mode = \"spawn\": {}",
                             repository.name
                         );
                     }
@@ -225,38 +216,55 @@ impl UserConfig {
 }
 
 impl UserRepositoryConfig {
-    pub fn effective_serve_config(&self) -> UserServeConfig {
-        self.serve.clone().unwrap_or_default()
+    pub fn server_config(&self) -> Result<&UserServerConfig> {
+        self.server
+            .as_ref()
+            .ok_or_else(|| anyhow!("repository.server is required for mode = \"spawn\""))
     }
 
     pub fn upstream_plugin_url_prefix(&self) -> Cow<'_, str> {
         match self.mode {
-            RepositoryMode::Spawn => Cow::Owned(self.effective_serve_config().plugin_url_prefix),
-            RepositoryMode::Attach => Cow::Borrowed(&self.plugin_url_prefix),
+            RepositoryMode::Spawn | RepositoryMode::Attach => {
+                Cow::Borrowed(&self.plugin_url_prefix)
+            }
         }
     }
 }
 
-impl UserServeConfig {
-    pub fn normalize_port(&self) -> u16 {
-        self.port
+impl UserServerConfig {
+    pub fn port(&self) -> Option<u16> {
+        self.values
+            .get("port")
+            .and_then(Value::as_integer)
+            .and_then(|value| u16::try_from(value).ok())
     }
-}
 
-fn default_server_port() -> u16 {
-    3000
+    pub fn cli_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::new();
+        for (name, value) in &self.values {
+            args.push(format!(
+                "--{}={}",
+                name.replace('_', "-"),
+                scalar_value(name, value)?
+            ));
+        }
+        args.extend(self.args.iter().cloned());
+        Ok(args)
+    }
 }
 
 fn default_plugin_url_prefix() -> String {
     "/.plugin".into()
 }
 
-fn default_policy_url_prefix() -> String {
-    "/.policy".into()
-}
-
-fn default_info_url_prefix() -> String {
-    "/.info".into()
+fn scalar_value(name: &str, value: &Value) -> Result<String> {
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        Value::Integer(value) => Ok(value.to_string()),
+        Value::Float(value) => Ok(value.to_string()),
+        Value::Boolean(value) => Ok(value.to_string()),
+        _ => bail!("repository.server.{name} must be a scalar value"),
+    }
 }
 
 #[cfg(test)]
@@ -273,7 +281,7 @@ mode = "spawn"
 port = 3031
 as = "alice"
 
-[repository.serve]
+[repository.server]
 port = 3020
 plugin_url_prefix = "/.plugin2"
 "#,
@@ -287,9 +295,12 @@ plugin_url_prefix = "/.plugin2"
         assert_eq!(config.repository[0].where_, None);
         assert_eq!(config.repository[0].as_user, "alice");
         assert_eq!(config.repository[0].plugin_url_prefix, "/.plugin");
-        let serve = config.repository[0].serve.as_ref().unwrap();
-        assert_eq!(serve.port, 3020);
-        assert_eq!(serve.plugin_url_prefix, "/.plugin2");
+        let server = config.repository[0].server.as_ref().unwrap();
+        assert_eq!(server.port(), Some(3020));
+        assert_eq!(
+            server.cli_args().unwrap(),
+            vec!["--plugin-url-prefix=/.plugin2", "--port=3020"]
+        );
     }
 
     #[test]
@@ -342,5 +353,30 @@ plugin = "md-preview"
         assert_eq!(task.step.len(), 1);
         assert_eq!(task.step[0].repository, "local");
         assert_eq!(task.step[0].plugin, "md-preview");
+    }
+
+    #[test]
+    fn spawn_repository_requires_server_port() {
+        let error = UserConfig::load_toml(
+            r#"
+[[repository]]
+name = "local"
+mode = "spawn"
+port = 3031
+as = "alice"
+
+[repository.server]
+plugin_url_prefix = "/.plugin2"
+"#,
+        )
+        .unwrap()
+        .validate()
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("repository.server.port is required when mode = \"spawn\"")
+        );
     }
 }
