@@ -10,19 +10,16 @@ pub fn parse_cli_options<I>(args: I) -> Result<CliOptions>
 where
     I: IntoIterator<Item = String>,
 {
-    let mut args = args.into_iter();
     let mut repository_path = None;
 
-    while let Some(arg) = args.next() {
+    for arg in args {
         if repository_path.is_none() && !arg.starts_with("--") {
             repository_path = Some(Utf8PathBuf::from(arg));
             continue;
         }
         bail!("unknown argument: {arg}");
     }
-    Ok(CliOptions {
-        repository_path,
-    })
+    Ok(CliOptions { repository_path })
 }
 
 #[cfg(test)]

@@ -19,5 +19,6 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 workspace_fs_server = { path = "crates/workspace_fs_server" }
 workspace_fs_client = { path = "crates/workspace_fs_client" }

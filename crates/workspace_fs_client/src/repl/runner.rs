@@ -3,9 +3,7 @@ use std::io::BufRead;
 use anyhow::{Result, anyhow, bail};
 use tokio::sync::{mpsc, watch};
 
-use crate::{
-    config::user_config::UserConfig, runtime::app::ServerSupervisor, task_runner::task_runner,
-};
+use crate::{config::user_config::UserConfig, runtime::app::ServerSupervisor, task_runner};
 
 pub(crate) async fn run_repl(
     config: &UserConfig,
@@ -86,7 +84,7 @@ fn spawn_stdin_reader() -> mpsc::UnboundedReceiver<Result<String>> {
         .spawn(move || {
             let stdin = std::io::stdin();
             for line in stdin.lock().lines() {
-                let line = line.map_err(|error| anyhow::Error::from(error));
+                let line = line.map_err(anyhow::Error::from);
                 if tx.send(line).is_err() {
                     break;
                 }
