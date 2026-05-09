@@ -32,7 +32,7 @@ pub struct UserServerConfig {
 pub struct UserRepositoryConfig {
     pub name: String,
     pub mode: RepositoryMode,
-    pub port: u16,
+    pub client_port: u16,
     #[serde(rename = "where")]
     pub where_: Option<String>,
     #[serde(rename = "as")]
@@ -119,13 +119,16 @@ impl UserConfig {
                     repository.name
                 );
             }
-            if repository.port == 0 {
-                bail!("repository.port must not be zero: {}", repository.name);
-            }
-            if !seen_browser_ports.insert(repository.port) {
+            if repository.client_port == 0 {
                 bail!(
-                    "duplicate repository.port in .repo/user.toml: {}",
-                    repository.port
+                    "repository.client_port must not be zero: {}",
+                    repository.name
+                );
+            }
+            if !seen_browser_ports.insert(repository.client_port) {
+                bail!(
+                    "duplicate repository.client_port in .repo/user.toml: {}",
+                    repository.client_port
                 );
             }
             if repository.as_user.trim().is_empty() {
@@ -278,7 +281,7 @@ mod tests {
 [[repository]]
 name = "local"
 mode = "spawn"
-port = 3031
+client_port = 3031
 as = "alice"
 
 [repository.server]
@@ -291,7 +294,7 @@ plugin_url_prefix = "/.plugin2"
         assert_eq!(config.repository.len(), 1);
         assert_eq!(config.repository[0].name, "local");
         assert_eq!(config.repository[0].mode, RepositoryMode::Spawn);
-        assert_eq!(config.repository[0].port, 3031);
+        assert_eq!(config.repository[0].client_port, 3031);
         assert_eq!(config.repository[0].where_, None);
         assert_eq!(config.repository[0].as_user, "alice");
         assert_eq!(config.repository[0].plugin_url_prefix, "/.plugin");
@@ -310,13 +313,13 @@ plugin_url_prefix = "/.plugin2"
 [[repository]]
 name = "local"
 mode = "spawn"
-port = 3031
+client_port = 3031
 as = "alice"
 
 [[repository]]
 name = "remote"
 mode = "attach"
-port = 3032
+client_port = 3032
 where = "localhost:3000"
 as = "bob"
 "#,
@@ -336,7 +339,7 @@ as = "bob"
 [[repository]]
 name = "local"
 mode = "spawn"
-port = 3031
+client_port = 3031
 as = "alice"
 
 [[task]]
@@ -362,7 +365,7 @@ plugin = "md-preview"
 [[repository]]
 name = "local"
 mode = "spawn"
-port = 3031
+client_port = 3031
 as = "alice"
 
 [repository.server]

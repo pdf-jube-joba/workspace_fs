@@ -1,6 +1,6 @@
 # workspace_fs_client
 
-`workspace_fs_client` は local HTTP proxy と task runner です。`REPOSITORY/.repo/user.toml` を読み、`repository.port` ごとに browser 向けの入口を立てます。`mode = "spawn"` の repository は必要に応じて local server も起動します。path を省略すると cwd を使います。
+`workspace_fs_client` は local HTTP proxy と task runner です。`REPOSITORY/.repo/user.toml` を読み、`repository.client_port` ごとに browser 向けの入口を立てます。`mode = "spawn"` の repository は必要に応じて local server も起動します。path を省略すると cwd を使います。
 
 ## 起動
 
@@ -30,7 +30,7 @@ client 側の設定は `REPOSITORY/.repo/user.toml` に書きます。
 [[repository]]
 name = "local"
 mode = "spawn"
-port = 3031
+client_port = 3031
 as = "alice_browser"
 
 [repository.server]
@@ -46,7 +46,7 @@ plugin = "md-preview"
 
 - `repository.name`: client 側で使う接続先名
 - `repository.mode`: `spawn` か `attach`
-- `repository.port`: browser から見える client proxy の待受 port
+- `repository.client_port`: browser から見える client proxy の待受 port
 - `repository.as`: upstream へ付与する `user-identity`
 - `repository.where`: `attach` のときの HTTP 接続先。`spawn` のときは省略する
 - `repository.plugin_url_prefix`: plugin 実行 API の prefix。attach のときに使う
@@ -74,7 +74,7 @@ plugin = "md-preview"
 ## 注意
 
 - `user.toml` に `[[repository]]` が 1 つもない場合は起動しない
-- `repository.port` は repository ごとに重複できない
+- `repository.client_port` は repository ごとに重複できない
 - `mode = "spawn"` のとき `repository.server.port` は repository ごとに重複できない
 - `mode = "attach"` のとき `repository.where` は必須
 - `mode = "spawn"` のとき `repository.where` と `repository.server` は書けない

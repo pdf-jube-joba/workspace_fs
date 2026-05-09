@@ -41,7 +41,7 @@ impl Default for ServeSettings {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ServeSettingsOverride {
+pub struct ServeSettingsOverride {
     pub port: Option<u16>,
     pub plugin_url_prefix: Option<String>,
     pub policy_url_prefix: Option<String>,

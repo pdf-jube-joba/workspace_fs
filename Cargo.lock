@@ -1224,6 +1224,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "workspace_fs_server",
 ]
 
 [[package]]

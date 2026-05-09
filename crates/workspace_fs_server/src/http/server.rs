@@ -1,25 +1,14 @@
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     application::workspace_service::WorkspaceService,
-    http::{
-        cli::{CliOptions, parse_cli_options},
-        identity::IdentityConfig,
-        router::build_router,
-    },
+    http::{cli::CliOptions, identity::IdentityConfig, router::build_router},
     infra::{fs_repository::FsRepository, repository_config::RepositoryConfig},
 };
 
-pub async fn run_from_env() -> Result<()> {
-    init_tracing();
-    let cli = parse_cli_options(env::args().skip(1))?;
-    run(cli).await
-}
-
-pub(crate) async fn run(cli: CliOptions) -> Result<()> {
+pub async fn run(cli: CliOptions) -> Result<()> {
     let repository_root = cli.repository_path.canonicalize_utf8()?;
     let config = Arc::new(RepositoryConfig::load_with_serve_overrides(
         &repository_root,
@@ -45,13 +34,4 @@ pub(crate) async fn run(cli: CliOptions) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-fn init_tracing() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            env::var("RUST_LOG").unwrap_or_else(|_| "workspace_fs=info,tower_http=info".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
 }

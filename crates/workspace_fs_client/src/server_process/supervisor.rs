@@ -1,23 +1,20 @@
-use std::{env, process::Stdio};
-
 use anyhow::{Context, Result, anyhow};
 use camino::Utf8PathBuf;
 use tokio::{
     net::TcpStream,
-    process::{Child, Command},
+    task::JoinHandle,
     time::{Duration, Instant, sleep},
 };
+use workspace_fs_server as server;
 
 use crate::{
     config::user_config::{UserRepositoryConfig, UserServerConfig},
     runtime::app::{ServerSupervisor, SpawnedServer, normalize_upstream_base},
-    server_process::{SERVER_BINARY_BASENAME, SERVER_PACKAGE_NAME},
 };
 
 impl ServerSupervisor {
-    pub(crate) fn new(workspace_root: Utf8PathBuf, repository_root: Utf8PathBuf) -> Self {
+    pub(crate) fn new(repository_root: Utf8PathBuf) -> Self {
         Self {
-            workspace_root,
             repository_root,
             spawned: std::collections::HashMap::new(),
         }
@@ -55,72 +52,50 @@ impl ServerSupervisor {
             );
             return Ok(upstream_base);
         }
-        let child = self.spawn_server_process(server).await?;
+        let handle = self.spawn_server_task(server).await?;
         self.spawned.insert(
             repository.name.clone(),
             SpawnedServer {
-                child,
+                handle,
                 upstream_base: upstream_base.clone(),
             },
         );
         Ok(upstream_base)
     }
 
-    async fn spawn_server_process(&self, server: &UserServerConfig) -> Result<Child> {
-        self.build_server_binary().await?;
-        let binary = self.server_binary_path();
-        let mut command = Command::new(binary.as_std_path());
-        command
-            .arg(self.repository_root.as_str())
-            .args(server.cli_args()?)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-
-        let mut child = command.spawn().context("failed to launch server binary")?;
-        self.wait_for_server_ready(&mut child, server.port().unwrap_or_default())
-            .await?;
-        Ok(child)
+    async fn spawn_server_task(
+        &self,
+        server_config: &UserServerConfig,
+    ) -> Result<JoinHandle<Result<()>>> {
+        let cli = self.server_cli_options(server_config)?;
+        let port = server_config.port().unwrap_or_default();
+        let mut handle = tokio::spawn(async move { server::run(cli).await });
+        self.wait_for_server_ready(&mut handle, port).await?;
+        Ok(handle)
     }
 
-    async fn build_server_binary(&self) -> Result<()> {
-        let status = Command::new("cargo")
-            .arg("build")
-            .arg("-p")
-            .arg(SERVER_PACKAGE_NAME)
-            .current_dir(self.workspace_root.as_std_path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await
-            .with_context(|| format!("failed to build {SERVER_PACKAGE_NAME}"))?;
-
-        if !status.success() {
-            return Err(anyhow!(
-                "cargo build for {SERVER_PACKAGE_NAME} failed: {status}"
-            ));
-        }
-
-        Ok(())
+    fn server_cli_options(&self, server_config: &UserServerConfig) -> Result<server::CliOptions> {
+        let mut args = vec![self.repository_root.as_str().to_owned()];
+        args.extend(server_config.cli_args()?);
+        server::parse_cli_options(args)
+            .context("failed to build server CLI options from repository.server settings")
     }
 
-    fn server_binary_path(&self) -> Utf8PathBuf {
-        let name = if env::consts::EXE_EXTENSION.is_empty() {
-            SERVER_BINARY_BASENAME.to_owned()
-        } else {
-            format!("{SERVER_BINARY_BASENAME}.{}", env::consts::EXE_EXTENSION)
-        };
-        self.workspace_root.join("target").join("debug").join(name)
-    }
-
-    async fn wait_for_server_ready(&self, child: &mut Child, port: u16) -> Result<()> {
+    async fn wait_for_server_ready(
+        &self,
+        handle: &mut JoinHandle<Result<()>>,
+        port: u16,
+    ) -> Result<()> {
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         let deadline = Instant::now() + Duration::from_secs(15);
 
         loop {
-            if let Some(status) = child.try_wait().context("failed to check server status")? {
-                return Err(anyhow!("server process exited with {status}"));
+            if handle.is_finished() {
+                return Err(match handle.await {
+                    Ok(Ok(())) => anyhow!("server task exited before becoming ready"),
+                    Ok(Err(error)) => error.context("server task exited before becoming ready"),
+                    Err(error) => anyhow!("server task failed before becoming ready: {error}"),
+                });
             }
 
             match TcpStream::connect(addr).await {
@@ -141,24 +116,31 @@ impl ServerSupervisor {
 
     pub(crate) async fn shutdown_all(&mut self) {
         for spawned in self.spawned.values_mut() {
-            terminate_child(&mut spawned.child).await;
+            terminate_task(&mut spawned.handle).await;
         }
         self.spawned.clear();
     }
 }
 
-async fn terminate_child(child: &mut Child) {
-    if let Ok(Some(_)) = child.try_wait() {
+async fn terminate_task(handle: &mut JoinHandle<Result<()>>) {
+    if handle.is_finished() {
+        match handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "server task exited during shutdown");
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "server task join failed during shutdown");
+            }
+        }
         return;
     }
 
-    if let Err(error) = child.kill().await {
-        tracing::warn!(error = %error, pid = child.id().unwrap_or_default(), "failed to kill child process");
-        return;
-    }
-
-    if let Err(error) = child.wait().await {
-        tracing::warn!(error = %error, pid = child.id().unwrap_or_default(), "failed to wait for child process");
+    handle.abort();
+    if let Err(error) = handle.await
+        && !error.is_cancelled()
+    {
+        tracing::warn!(error = %error, "server task join failed after abort");
     }
 }
 

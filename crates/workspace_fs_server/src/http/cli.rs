@@ -4,12 +4,12 @@ use camino::Utf8PathBuf;
 use crate::infra::repository_config::ServeSettingsOverride;
 
 #[derive(Debug, Clone)]
-pub(crate) struct CliOptions {
+pub struct CliOptions {
     pub repository_path: Utf8PathBuf,
     pub serve_overrides: ServeSettingsOverride,
 }
 
-pub(crate) fn parse_cli_options<I>(args: I) -> Result<CliOptions>
+pub fn parse_cli_options<I>(args: I) -> Result<CliOptions>
 where
     I: IntoIterator<Item = String>,
 {

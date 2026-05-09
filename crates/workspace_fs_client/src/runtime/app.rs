@@ -1,10 +1,13 @@
-use std::{collections::HashMap, env, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use reqwest::Client;
-use tokio::{process::Child, signal, sync::watch, task::JoinSet};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tokio::{
+    signal,
+    sync::watch,
+    task::{JoinHandle, JoinSet},
+};
 
 use crate::{
     config::{cli::CliOptions, user_config::UserConfig},
@@ -21,27 +24,19 @@ pub(crate) struct AppState {
 }
 
 pub(crate) struct SpawnedServer {
-    pub(crate) child: Child,
+    pub(crate) handle: JoinHandle<Result<()>>,
     pub(crate) upstream_base: String,
 }
 
 pub(crate) struct ServerSupervisor {
-    pub(crate) workspace_root: Utf8PathBuf,
     pub(crate) repository_root: Utf8PathBuf,
     pub(crate) spawned: HashMap<String, SpawnedServer>,
-}
-
-pub async fn run_from_env() -> Result<()> {
-    init_tracing();
-    let cli = parse_cli_options(env::args().skip(1))?;
-    run(cli).await
 }
 
 pub async fn run(cli: CliOptions) -> Result<()> {
     let repository_root = resolve_repository_root(cli.repository_path.as_ref())?;
     let config = UserConfig::load(&repository_root)?;
-    let workspace_root = workspace_fs_root();
-    let mut supervisor = ServerSupervisor::new(workspace_root, repository_root.clone());
+    let mut supervisor = ServerSupervisor::new(repository_root.clone());
     let repositories = config.repositories_to_start(None)?;
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_for_signal = shutdown_tx.clone();
@@ -64,14 +59,14 @@ pub async fn run(cli: CliOptions) -> Result<()> {
         tracing::info!(
             repository = %repository_root,
             target_repository = %state.repository_name,
-            listen_port = repository.port,
+            listen_port = repository.client_port,
             upstream = %state.upstream_base,
             user_identity = %state.user_identity,
             "client proxy configuration loaded"
         );
 
         join_set.spawn(http_proxy::run_proxy_server(
-            repository.port,
+            repository.client_port,
             state,
             shutdown_rx.clone(),
         ));
@@ -130,22 +125,6 @@ pub async fn run(cli: CliOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn parse_cli_options<I>(args: I) -> Result<CliOptions>
-where
-    I: IntoIterator<Item = String>,
-{
-    crate::config::cli::parse_cli_options(args)
-}
-
-fn init_tracing() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            env::var("RUST_LOG").unwrap_or_else(|_| "workspace_fs=info,tower_http=info".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-}
-
 fn resolve_repository_root(path: Option<&Utf8PathBuf>) -> Result<Utf8PathBuf> {
     let base = match path {
         Some(path) => path.clone(),
@@ -179,12 +158,4 @@ pub(crate) fn build_http_client(context: &'static str) -> Result<Client> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .with_context(|| format!("failed to build {context} client"))
-}
-
-fn workspace_fs_root() -> Utf8PathBuf {
-    let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = manifest_dir.parent().and_then(|path| path.parent()) {
-        return root.to_owned();
-    }
-    manifest_dir
 }

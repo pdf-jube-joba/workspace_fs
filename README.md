@@ -5,7 +5,7 @@
 - server: [crates/workspace_fs_server/README.md](/home/namaniyu/source/workspace_fs/crates/workspace_fs_server/README.md)
   - `.repo/config.toml` を読んで、対象 repository に対する API を作ります。
 - client: [crates/workspace_fs_client/README.md](/home/namaniyu/source/workspace_fs/crates/workspace_fs_client/README.md)
-  - `REPOSITORY/.repo/user.toml` を読み、`repository.port` ごとに browser 向けの入口を立てます。
+  - `REPOSITORY/.repo/user.toml` を読み、`repository.client_port` ごとに browser 向けの入口を立てます。
 
 主な起動例:
 
