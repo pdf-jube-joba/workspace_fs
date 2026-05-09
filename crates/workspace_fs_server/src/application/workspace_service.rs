@@ -19,8 +19,7 @@ use crate::{
         response::{content_type_for_path, file_response, text_response},
     },
     infra::{
-        fs_repository::{FsRepository, Repository},
-        plugin_runner::PluginRunner,
+        fs_repository::FsRepository, plugin_runner::PluginRunner,
         repository_config::RepositoryConfig,
     },
 };

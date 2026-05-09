@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, anyhow, bail};
-use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use tokio::fs;
 
@@ -28,19 +27,7 @@ pub(crate) enum RepositoryError {
     DirectoryNotEmpty,
     NonUtf8Path,
     InvalidDirectoryEntry,
-}
-
-// .repo 以外を書き換えるインターフェースの提供
-#[async_trait]
-pub(crate) trait Repository: Send + Sync {
-    async fn list_directory(&self, path: &WorkspacePath) -> Result<Vec<String>>;
-    async fn path_info(&self, path: &WorkspacePath) -> Result<PathInfo>;
-    async fn create_directory(&self, path: &WorkspacePath) -> Result<()>;
-    async fn delete_directory(&self, path: &WorkspacePath) -> Result<()>;
-    async fn read_file(&self, path: &WorkspacePath) -> Result<Vec<u8>>;
-    async fn create_text_file(&self, path: &WorkspacePath, content: &str) -> Result<()>;
-    async fn write_text_file(&self, path: &WorkspacePath, content: &str) -> Result<()>;
-    async fn delete_file(&self, path: &WorkspacePath) -> Result<()>;
+    Internal(String),
 }
 
 pub(crate) struct FsRepository {
@@ -112,7 +99,10 @@ impl FsRepository {
         reserved_paths
     }
 
-    fn resolve_path(&self, requested_path: &WorkspacePath) -> Result<Utf8PathBuf> {
+    fn resolve_path(
+        &self,
+        requested_path: &WorkspacePath,
+    ) -> std::result::Result<Utf8PathBuf, RepositoryError> {
         if let Some(resolved) = self.resolve_mounted_path(requested_path) {
             return Ok(resolved);
         }
@@ -120,19 +110,23 @@ impl FsRepository {
         Ok(requested_path.join_to(&self.repository_root))
     }
 
-    fn ensure_parent_directory_exists(&self, path: &Utf8Path) -> Result<()> {
+    fn ensure_parent_directory_exists(
+        &self,
+        path: &Utf8Path,
+    ) -> std::result::Result<(), RepositoryError> {
         let Some(parent) = path.parent() else {
-            return Err(RepositoryError::ParentDirectoryNotFound.into());
+            return Err(RepositoryError::ParentDirectoryNotFound);
         };
 
         self.ensure_no_symlink_components(parent, false)?;
         if !parent.exists() {
-            return Err(RepositoryError::ParentDirectoryNotFound.into());
+            return Err(RepositoryError::ParentDirectoryNotFound);
         }
-        let metadata = std::fs::symlink_metadata(parent.as_std_path())
-            .context("failed to inspect parent directory")?;
+        let metadata = std::fs::symlink_metadata(parent.as_std_path()).map_err(|error| {
+            RepositoryError::Internal(format!("failed to inspect parent directory: {error}"))
+        })?;
         if !metadata.is_dir() {
-            return Err(RepositoryError::ParentPathNotDirectory.into());
+            return Err(RepositoryError::ParentPathNotDirectory);
         }
 
         Ok(())
@@ -151,13 +145,16 @@ impl FsRepository {
         Some(resolved)
     }
 
-    fn ensure_not_reserved_path(&self, requested_path: &WorkspacePath) -> Result<()> {
+    fn ensure_not_reserved_path(
+        &self,
+        requested_path: &WorkspacePath,
+    ) -> std::result::Result<(), RepositoryError> {
         if self
             .reserved_paths
             .iter()
             .any(|reserved_path| requested_path.starts_with(reserved_path))
         {
-            return Err(RepositoryError::ReservedPath.into());
+            return Err(RepositoryError::ReservedPath);
         }
         Ok(())
     }
@@ -166,7 +163,7 @@ impl FsRepository {
         &self,
         path: &Utf8Path,
         allow_missing_final: bool,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), RepositoryError> {
         let relative = path
             .strip_prefix(&self.repository_root)
             .map_err(|_| RepositoryError::ResolvedPathEscapesRepositoryRoot)?;
@@ -175,7 +172,7 @@ impl FsRepository {
         if let Ok(metadata) = std::fs::symlink_metadata(current.as_std_path())
             && metadata.file_type().is_symlink()
         {
-            return Err(RepositoryError::SymlinkPathNotAllowed.into());
+            return Err(RepositoryError::SymlinkPathNotAllowed);
         }
 
         for component in relative.components() {
@@ -183,7 +180,7 @@ impl FsRepository {
             match std::fs::symlink_metadata(current.as_std_path()) {
                 Ok(metadata) => {
                     if metadata.file_type().is_symlink() {
-                        return Err(RepositoryError::SymlinkPathNotAllowed.into());
+                        return Err(RepositoryError::SymlinkPathNotAllowed);
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -193,7 +190,9 @@ impl FsRepository {
                     break;
                 }
                 Err(error) => {
-                    return Err(error).context("failed to inspect path");
+                    return Err(RepositoryError::Internal(format!(
+                        "failed to inspect path: {error}"
+                    )));
                 }
             }
         }
@@ -201,17 +200,26 @@ impl FsRepository {
         Ok(())
     }
 
-    fn read_directory_entries(&self, directory: &Utf8Path) -> Result<Vec<String>> {
+    fn read_directory_entries(
+        &self,
+        directory: &Utf8Path,
+    ) -> std::result::Result<Vec<String>, RepositoryError> {
         let mut entries = Vec::new();
-        for dir_entry in std::fs::read_dir(directory.as_std_path())? {
-            let dir_entry = dir_entry?;
+        let read_dir = std::fs::read_dir(directory.as_std_path()).map_err(|error| {
+            RepositoryError::Internal(format!("failed to read directory: {error}"))
+        })?;
+        for dir_entry in read_dir {
+            let dir_entry = dir_entry.map_err(|error| {
+                RepositoryError::Internal(format!("failed to read directory entry: {error}"))
+            })?;
             let path = dir_entry.path();
             let utf8 =
                 Utf8PathBuf::from_path_buf(path).map_err(|_| RepositoryError::NonUtf8Path)?;
-            let metadata = std::fs::symlink_metadata(utf8.as_std_path())
-                .context("failed to inspect directory entry")?;
+            let metadata = std::fs::symlink_metadata(utf8.as_std_path()).map_err(|error| {
+                RepositoryError::Internal(format!("failed to inspect directory entry: {error}"))
+            })?;
             if metadata.file_type().is_symlink() {
-                return Err(RepositoryError::SymlinkPathNotAllowed.into());
+                return Err(RepositoryError::SymlinkPathNotAllowed);
             }
 
             let mut entry = utf8
@@ -229,32 +237,37 @@ impl FsRepository {
         entries.sort();
         Ok(entries)
     }
-}
 
-#[async_trait]
-impl Repository for FsRepository {
-    async fn list_directory(&self, path: &WorkspacePath) -> Result<Vec<String>> {
+    pub async fn list_directory(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<Vec<String>, RepositoryError> {
         let directory = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&directory, false)?;
         if !directory.exists() {
-            return Err(RepositoryError::DirectoryNotFound.into());
+            return Err(RepositoryError::DirectoryNotFound);
         }
         if !directory.is_dir() {
-            return Err(RepositoryError::NotDirectory.into());
+            return Err(RepositoryError::NotDirectory);
         }
 
         self.read_directory_entries(&directory)
     }
 
-    async fn path_info(&self, path: &WorkspacePath) -> Result<PathInfo> {
+    pub async fn path_info(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<PathInfo, RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
         if !resolved.exists() {
-            return Err(RepositoryError::FileNotFound.into());
+            return Err(RepositoryError::FileNotFound);
         }
         let metadata = fs::metadata(resolved.as_std_path())
             .await
-            .context("failed to read metadata")?;
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to read metadata: {error}"))
+            })?;
         let kind = if metadata.is_dir() {
             PathInfoKind::Directory
         } else {
@@ -274,107 +287,141 @@ impl Repository for FsRepository {
         ))
     }
 
-    async fn create_directory(&self, path: &WorkspacePath) -> Result<()> {
+    pub async fn create_directory(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<(), RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, true)?;
 
         if resolved.exists() {
-            return Err(RepositoryError::DirectoryAlreadyExists.into());
+            return Err(RepositoryError::DirectoryAlreadyExists);
         }
 
         self.ensure_parent_directory_exists(&resolved)?;
 
         fs::create_dir(resolved.as_std_path())
             .await
-            .context("failed to create directory")?;
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to create directory: {error}"))
+            })?;
         Ok(())
     }
 
-    async fn delete_directory(&self, path: &WorkspacePath) -> Result<()> {
+    pub async fn delete_directory(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<(), RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            return Err(RepositoryError::DirectoryNotFound.into());
+            return Err(RepositoryError::DirectoryNotFound);
         }
 
         if !resolved.is_dir() {
-            return Err(RepositoryError::PathIsNotDirectory.into());
+            return Err(RepositoryError::PathIsNotDirectory);
         }
 
-        if std::fs::read_dir(resolved.as_std_path())?.next().is_some() {
-            return Err(RepositoryError::DirectoryNotEmpty.into());
+        if std::fs::read_dir(resolved.as_std_path())
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to read directory: {error}"))
+            })?
+            .next()
+            .is_some()
+        {
+            return Err(RepositoryError::DirectoryNotEmpty);
         }
 
         fs::remove_dir(resolved.as_std_path())
             .await
-            .context("failed to delete directory")?;
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to delete directory: {error}"))
+            })?;
         Ok(())
     }
 
-    async fn read_file(&self, path: &WorkspacePath) -> Result<Vec<u8>> {
+    pub async fn read_file(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<Vec<u8>, RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
         if !resolved.exists() {
-            return Err(RepositoryError::FileNotFound.into());
+            return Err(RepositoryError::FileNotFound);
         }
         if resolved.is_dir() {
-            return Err(RepositoryError::PathIsDirectory.into());
+            return Err(RepositoryError::PathIsDirectory);
         }
         fs::read(resolved.as_std_path())
             .await
-            .context("failed to read file")
+            .map_err(|error| RepositoryError::Internal(format!("failed to read file: {error}")))
     }
 
-    async fn create_text_file(&self, path: &WorkspacePath, content: &str) -> Result<()> {
+    pub async fn create_text_file(
+        &self,
+        path: &WorkspacePath,
+        content: &str,
+    ) -> std::result::Result<(), RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, true)?;
 
         if resolved.exists() {
-            return Err(RepositoryError::FileAlreadyExists.into());
+            return Err(RepositoryError::FileAlreadyExists);
         }
 
         self.ensure_parent_directory_exists(&resolved)?;
 
         fs::write(resolved.as_std_path(), content)
             .await
-            .context("failed to create file")?;
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to create file: {error}"))
+            })?;
         Ok(())
     }
 
-    async fn write_text_file(&self, path: &WorkspacePath, content: &str) -> Result<()> {
+    pub async fn write_text_file(
+        &self,
+        path: &WorkspacePath,
+        content: &str,
+    ) -> std::result::Result<(), RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            return Err(RepositoryError::FileNotFound.into());
+            return Err(RepositoryError::FileNotFound);
         }
 
         if resolved.is_dir() {
-            return Err(RepositoryError::PathIsDirectory.into());
+            return Err(RepositoryError::PathIsDirectory);
         }
 
         fs::write(resolved.as_std_path(), content)
             .await
-            .context("failed to write file")?;
+            .map_err(|error| RepositoryError::Internal(format!("failed to write file: {error}")))?;
         Ok(())
     }
 
-    async fn delete_file(&self, path: &WorkspacePath) -> Result<()> {
+    pub async fn delete_file(
+        &self,
+        path: &WorkspacePath,
+    ) -> std::result::Result<(), RepositoryError> {
         let resolved = self.resolve_path(path)?;
         self.ensure_no_symlink_components(&resolved, false)?;
 
         if !resolved.exists() {
-            return Err(RepositoryError::FileNotFound.into());
+            return Err(RepositoryError::FileNotFound);
         }
 
         if resolved.is_dir() {
-            return Err(RepositoryError::PathIsDirectory.into());
+            return Err(RepositoryError::PathIsDirectory);
         }
 
         fs::remove_file(resolved.as_std_path())
             .await
-            .context("failed to delete file")?;
+            .map_err(|error| {
+                RepositoryError::Internal(format!("failed to delete file: {error}"))
+            })?;
         Ok(())
     }
 }
@@ -397,6 +444,7 @@ impl std::fmt::Display for RepositoryError {
             Self::DirectoryNotEmpty => "directory is not empty",
             Self::NonUtf8Path => "non-UTF-8 path",
             Self::InvalidDirectoryEntry => "invalid directory entry",
+            Self::Internal(message) => return f.write_str(message),
         };
         f.write_str(message)
     }

@@ -63,127 +63,91 @@ impl HttpError {
         }
     }
 
-    pub fn from_path_info(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::FileNotFound | RepositoryError::DirectoryNotFound) => {
+    pub(crate) fn from_path_info(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::FileNotFound | RepositoryError::DirectoryNotFound => {
                 Self::not_found("path not found")
             }
-            Some(
-                RepositoryError::ReservedPath
-                | RepositoryError::ResolvedPathEscapesRepositoryRoot
-                | RepositoryError::NonUtf8Path
-                | RepositoryError::InvalidDirectoryEntry,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_directory_listing(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::DirectoryNotFound | RepositoryError::NotDirectory) => {
+    pub(crate) fn from_directory_listing(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::DirectoryNotFound | RepositoryError::NotDirectory => {
                 Self::not_found("directory not found")
             }
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_read_file(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::FileNotFound) => Self::not_found("path not found"),
-            Some(RepositoryError::PathIsDirectory) => Self::bad_request("path is a directory"),
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+    pub(crate) fn from_read_file(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::FileNotFound => Self::not_found("path not found"),
+            RepositoryError::PathIsDirectory => Self::bad_request("path is a directory"),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_create_file(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::FileAlreadyExists) => Self::conflict("file already exists"),
-            Some(RepositoryError::ParentDirectoryNotFound) => {
+    pub(crate) fn from_create_file(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::FileAlreadyExists => Self::conflict("file already exists"),
+            RepositoryError::ParentDirectoryNotFound => {
                 Self::not_found("parent directory not found")
             }
-            Some(RepositoryError::ParentPathNotDirectory) => {
+            RepositoryError::ParentPathNotDirectory => {
                 Self::bad_request("parent path is not a directory")
             }
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_create_directory(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::DirectoryAlreadyExists) => {
-                Self::conflict("directory already exists")
-            }
-            Some(RepositoryError::ParentDirectoryNotFound) => {
+    pub(crate) fn from_create_directory(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::DirectoryAlreadyExists => Self::conflict("directory already exists"),
+            RepositoryError::ParentDirectoryNotFound => {
                 Self::not_found("parent directory not found")
             }
-            Some(RepositoryError::ParentPathNotDirectory) => {
+            RepositoryError::ParentPathNotDirectory => {
                 Self::bad_request("parent path is not a directory")
             }
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_write_file(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::FileNotFound) => Self::not_found("file not found"),
-            Some(RepositoryError::PathIsDirectory) => Self::bad_request("path is a directory"),
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+    pub(crate) fn from_write_file(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::FileNotFound => Self::not_found("file not found"),
+            RepositoryError::PathIsDirectory => Self::bad_request("path is a directory"),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_delete_file(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::FileNotFound) => Self::not_found("file not found"),
-            Some(RepositoryError::PathIsDirectory) => Self::bad_request("path is a directory"),
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+    pub(crate) fn from_delete_file(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::FileNotFound => Self::not_found("file not found"),
+            RepositoryError::PathIsDirectory => Self::bad_request("path is a directory"),
+            error => Self::from_repository_error(error),
         }
     }
 
-    pub fn from_delete_directory(error: Error) -> Self {
-        match repository_error(&error) {
-            Some(RepositoryError::DirectoryNotFound) => Self::not_found("directory not found"),
-            Some(RepositoryError::PathIsNotDirectory) => {
-                Self::bad_request("path is not a directory")
-            }
-            Some(RepositoryError::DirectoryNotEmpty) => Self::conflict("directory is not empty"),
-            Some(
-                RepositoryError::ReservedPath | RepositoryError::ResolvedPathEscapesRepositoryRoot,
-            ) => Self::bad_request(error.to_string()),
-            Some(RepositoryError::SymlinkPathNotAllowed) => Self::bad_request(error.to_string()),
-            Some(_) => Self::internal(error),
-            None => Self::internal(error),
+    pub(crate) fn from_delete_directory(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::DirectoryNotFound => Self::not_found("directory not found"),
+            RepositoryError::PathIsNotDirectory => Self::bad_request("path is not a directory"),
+            RepositoryError::DirectoryNotEmpty => Self::conflict("directory is not empty"),
+            error => Self::from_repository_error(error),
+        }
+    }
+
+    fn from_repository_error(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::ReservedPath
+            | RepositoryError::ResolvedPathEscapesRepositoryRoot
+            | RepositoryError::SymlinkPathNotAllowed
+            | RepositoryError::NonUtf8Path
+            | RepositoryError::InvalidDirectoryEntry => Self::bad_request(error.to_string()),
+            _ => Self::internal(error),
         }
     }
 }
@@ -200,8 +164,4 @@ impl IntoResponse for HttpError {
         )
             .into_response()
     }
-}
-
-fn repository_error(error: &Error) -> Option<&RepositoryError> {
-    error.downcast_ref::<RepositoryError>()
 }
