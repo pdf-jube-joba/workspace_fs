@@ -1,123 +1,114 @@
 # md_preview
 
-## Purpose
+`md_preview` は markdown preview と directory browser 用の静的 asset を生成する default plugin です。`build.mjs` が `src/` 以下を bundle し、viewer HTML と script、KaTeX 関連 asset、link index を出力します。
 
-This plugin builds browser assets for markdown preview and directory browsing.
-The source code lives in `src/`.
-`build.mjs` bundles the source into an explicit output directory.
+## build
 
-## Build
-
-Run `npm install` once if dependencies are missing.
-Run the build after changing `src/`.
+plugin root で:
 
 ```bash
 node ./build.mjs --out-dir <path>
 ```
 
-The build command requires `--out-dir <path>`.
-All generated files are written under that directory.
-The built output includes the viewer HTML, CSS, and JS from `src/viewer/`.
-The built output also includes the bundled KaTeX stylesheet wrapper.
+引数:
 
-## workspace_fs Plugin Use
+- `--out-dir <path>`: 生成物の出力先。必須
+- `--repository-root <path>`: markdown 走査や `macro_path` 解決の基準にする repository root。省略時は cwd
 
-Mount the plugin output at any prefix.
-Open the generated viewer files from that mount.
+依存が未導入なら最初に `npm install` が必要です。
 
-For `workspace_fs` plugins, pass `{OUTPUT_DIRECTORY}` to `--out-dir`.
-Configure optional transforms under `[plugin.md_preview]`.
-Configure viewer-specific head assets under `[plugin.md_preview.<viewer>]`.
+## workspace_fs での使い方
 
-## Markdown Preview
+`workspace_fs_server` から default plugin として実行する想定です。通常は出力先に `{OUTPUT_DIRECTORY}` を渡します。
 
-Markdown is rendered in the browser with `remark` and `rehype`.
-Configured source transforms run before markdown parsing.
+```toml
+[[plugin]]
+name = "md-preview"
+runner = "default"
+allow = ["alice_browser"]
+mount = "/md/"
 
-GitHub-style alerts are converted to custom HTML blocks.
-Examples include `> [!NOTE]` and `> [!TIP]`.
+[plugin.md_preview]
+macro_path = "./macros.txt"
 
-The default build includes a KaTeX transform.
-It handles math written as `\(...\)` and `\[...\]`.
+[plugin.md_preview.md_viewer]
+additional_js = ["assets/header.js"]
+```
 
-## Macros
+- `mount` 先に生成された `md_preview.html` や `directory_view.html` を公開する
+- plugin 設定は `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` 経由で `build.mjs` に渡る
+- viewer ごとの head asset 注入は `[plugin.md_preview.<viewer>]` で指定する
 
-KaTeX macros are not loaded implicitly by the viewer.
+## 生成物
 
-Set `[plugin.md_preview].macro_path` to copy a repository-local macros file.
-The copied file is emitted as `macros.txt`.
-If `macro_path` is omitted, `macros.txt` is not generated.
+主に次のファイルを出力します。
 
-Callers should load `macros.txt`.
-Callers should convert it with `from_text(text)`.
-Callers should pass the result as `macros`.
+- `md_preview.html`: markdown viewer
+- `md_editor.html`: markdown editor
+- `directory_view.html`: directory viewer
+- `markdown_viewer.js`: browser 側の markdown renderer
+- `transform_runner.js`: markdown 変換 hook の実行器
+- `katex_transform.js`: 既定の KaTeX transform
+- `link_index.json`: repository 内の markdown から作る wiki link index
+- `macros.txt`: `macro_path` を指定した場合のみ生成
 
-## Link Index
+KaTeX の CSS と font は `vendor/katex/` にコピーします。
 
-The build generates `link_index.json`.
-It scans repository markdown files.
-The directory viewer uses this index for backlink-style link pages.
+## markdown 表示
 
-## Directory View
+- markdown は browser 側で render する
+- 既定で KaTeX transform を入れる
+- `> [!NOTE]` や `> [!TIP]` のような GitHub-style alert を専用 block に変換する
+- `[[plugin.md_preview.transform]]` を指定すると、既定の KaTeX transform の後ろに追加で実行する
 
-`directory_view.html` browses repository directories.
-It uses the workspace listing API.
+transform の各 entry では次を指定します。
 
-For a path such as `docs/`, it requests `GET /docs/`.
-The listing response is the source of candidate entries.
+- `name`
+- `url`
+- `entrypoint`
+- その他の field は `options` としてそのまま渡る
 
-## Directory Cards
+## macros
 
-Directory entries are shown as directory cards.
-Each directory card links to another `directory_view.html` page.
+`[plugin.md_preview].macro_path` を指定すると、repository 内の file を `macros.txt` として出力先へコピーします。
 
-The card preview uses the child listing.
-If the directory contains `README.md`, the card tries to use that file as preview text.
-If `README.md` cannot be read, the card keeps the listing preview.
+- `macro_path` は repository root 相対
+- file が存在しない場合は build error
+- viewer は `macros.txt` を暗黙には読み込まない
 
-## File Cards
+## viewer ごとの追加 asset
 
-Not every listed file becomes a card.
-The viewer currently renders file cards only for these extensions:
+次の table を使えます。
 
-- `md`
-- `txt`
-- `rs`
+- `[plugin.md_preview.md_viewer]`
+- `[plugin.md_preview.md_editor]`
+- `[plugin.md_preview.directory_view]`
 
-Files with other extensions stay available through the API.
-They are not shown as directory view cards.
-For example, `.gitmodules`, `Cargo.toml`, and `package.json` are not shown as file cards.
+各 table では次の配列を指定できます。
 
-Markdown file cards link to `md_preview.html`.
-Text and Rust file cards link to the raw repository path.
+- `additional_js`
+- `additional_module_js`
+- `additional_css`
 
-## Policy
+これらの path は repository 相対で、生成される HTML には `/assets/header.js` のような root-relative URL として埋め込みます。絶対 path や repository root の外に出る path は拒否します。
 
-The directory view follows `workspace_fs` policy.
-It does not bypass repository access rules.
+## directory view
 
-The initial listing request must be allowed.
-Each candidate entry also needs readable path info.
-Entries whose path info request fails are skipped.
-This can happen when `GET` is denied by policy.
+`directory_view.html` は `workspace_fs` の一覧 API を使って repository を browse します。
 
-## Ignore
+- `GET /PATH/` の一覧結果を使う
+- 各 entry の path info が読めない場合、その entry は表示しない
+- ignore された path は一覧 API 側で消えるので表示されない
+- policy を bypass せず、読めない path にはアクセスしない
 
-The directory view follows `workspace_fs` ignore rules.
-Ignored entries are removed by the listing API.
-Ignored paths are not visible to the directory view.
+directory card は子 directory へリンクし、`README.md` があれば preview 文の候補として使います。file card は現在 `md`、`txt`、`rs` だけを表示対象にし、markdown file は `md_preview.html` へ、それ以外は raw path へリンクします。
 
-Direct requests to ignored paths are rejected by `workspace_fs`.
+## link index
 
-## Generated Settings
+`link_index.json` は repository 内の `.md` file を走査して生成します。
 
-When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[[plugin.md_preview.transform]]`, `build.mjs` appends those transforms after the default KaTeX transform.
-When `WORKSPACE_FS_PLUGIN_SETTINGS_JSON` contains `[plugin.md_preview.md_viewer]`, `[plugin.md_preview.md_editor]`, or `[plugin.md_preview.directory_view]`, `build.mjs` injects the configured assets into that viewer's `<head>`.
+- 走査対象は repository root 以下
+- `.repo/`、`.git/`、`node_modules/`、`target/` は除外
+- wiki link の term ごとに参照元 page 一覧を持つ
 
-Each viewer table can contain:
-
-- `additional_js = ["assets/header.js"]`
-- `additional_module_js = ["assets/module.js"]`
-- `additional_css = ["assets/header.css"]`
-
-These paths are repository-relative and become root-relative URLs in the generated HTML.
+directory viewer や markdown viewer はこの index を使って backlink 風の link page を表示します。
