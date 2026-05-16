@@ -42,7 +42,7 @@ body {
   min-height: 100vh;
   padding: 20px;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto;
   gap: 14px;
 }
 
@@ -114,22 +114,20 @@ body {
 }
 
 .panes {
-  min-height: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 14px;
 }
 
 .pane {
-  min-height: 0;
   padding: 14px;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto;
   gap: 10px;
 }
 
 .surface {
-  min-height: 0;
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -138,14 +136,25 @@ body {
   padding: 16px;
 }
 
+.preview-pane {
+  position: sticky;
+  top: 20px;
+}
+
 #preview {
   margin: 0;
+  height: calc(100vh - 160px);
+  min-height: 320px;
+  max-height: calc(100vh - 160px);
   overflow: auto;
   line-height: 1.6;
 }
 
 .editor {
+  display: block;
   resize: none;
+  min-height: calc(100vh - 160px);
+  overflow: hidden;
   font: 15px/1.6 "Iosevka", "IBM Plex Mono", monospace;
 }
 
@@ -169,6 +178,17 @@ textarea {
 
   .panes {
     grid-template-columns: 1fr;
+  }
+
+  .preview-pane {
+    position: static;
+  }
+
+  #preview,
+  .editor {
+    height: auto;
+    max-height: none;
+    min-height: 320px;
   }
 
   .status-note {
